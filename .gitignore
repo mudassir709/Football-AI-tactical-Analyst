@@ -1,0 +1,21 @@
+# Python & Virtual Environments
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Large Project Data & Model Weights
+data/*.mp4
+data/*.avi
+data/*.mov
+models/*.pt
+models/*.weights
+
+# IDE & Local Settings
+.vscode/
+.streamlit/secrets.toml
