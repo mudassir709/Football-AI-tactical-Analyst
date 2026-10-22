@@ -5,19 +5,35 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Node.js (frontend/ and backend/)
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Secrets - never commit API keys or passwords
+.env
+.env.*
+!.env.example
+
 # Operating System Files
 .DS_Store
 Thumbs.db
 
 # Large Project Data & Model Weights
-data/*.mp4
-data/*.avi
-data/*.mov
-models/*.pt
-models/*.weights
+worker/data/*.mp4
+worker/data/*.avi
+worker/data/*.mov
+worker/models/*.pt
+worker/models/*.weights
+worker/models/*_openvino_model/
+
+# Pipeline outputs (preview videos, cached tracks)
+worker/outputs/
+
+# Uploaded match videos and job results stored by the platform
+storage/
 
 # IDE & Local Settings
 .vscode/
-.streamlit/secrets.toml
-# Pipeline outputs (preview videos, cached tracks)
-outputs/
