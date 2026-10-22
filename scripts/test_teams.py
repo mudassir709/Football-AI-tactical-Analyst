@@ -82,7 +82,7 @@ def write_team_video(
             )
             labels = [
                 f"#{tid} {'GK' if cls == 'goalkeeper' else ''}".strip()
-                for tid, cls in zip(people["tracker_id"], people["class_name"])
+                for tid, cls in zip(people["tracker_id"], people["role"])
             ]
             scene = ellipse.annotate(frame.copy(), people_det)
             scene = label.annotate(scene, people_det, labels=labels)
@@ -107,7 +107,7 @@ def plot_teams(tracks: pd.DataFrame, assignment: TeamAssignment, path: Path) -> 
             pitch.scatter(row.pitch_x, row.pitch_y, ax=ax, s=60, color=BALL_HEX,
                           edgecolors="black", zorder=4)
             continue
-        marker = "s" if row.class_name == "goalkeeper" else "o"
+        marker = "s" if row.role == "goalkeeper" else "o"
         pitch.scatter(row.pitch_x, row.pitch_y, ax=ax, s=220, marker=marker,
                       color=colours[row.team], edgecolors="black", zorder=3)
         pitch.annotate(str(row.tracker_id), (row.pitch_x, row.pitch_y), ax=ax, fontsize=7,
@@ -135,7 +135,7 @@ def main() -> None:
 
     # --- Summary -------------------------------------------------------------
     track_info = tracks[tracks["class_id"] != config.BALL_ID].groupby("tracker_id").agg(
-        cls=("class_name", lambda s: s.mode().iat[0]), team=("team", "first")
+        cls=("role", "first"), team=("team", "first")
     )
     print(f"\nExtracted {len(features)} jersey crops and clustered in {elapsed:.1f}s")
     for team in (config.TEAM_A, config.TEAM_B):

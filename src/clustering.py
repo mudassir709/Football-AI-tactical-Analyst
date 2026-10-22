@@ -1,9 +1,14 @@
-"""Clustering stages of the pipeline: team assignment from jersey colour.
+"""Clustering stages of the pipeline: team assignment and formation detection.
 
 Team assignment works per *track*, not per detection: each track's shirt colour
 is the median over several sampled crops, which smooths out occlusions, motion
 blur and lighting changes, and K-Means then splits those colours into two teams.
 Goalkeepers wear a distinct kit, so they are assigned by pitch proximity instead.
+
+Formation detection averages each outfield player's position over a time window
+(their "role centroid"), normalises the team's shape, and matches it to formation
+templates with the Hungarian algorithm. Hysteresis stops flicker between
+similar templates, so a reported change reflects a real shift in shape.
 """
 
 from __future__ import annotations
@@ -15,9 +20,11 @@ import cv2
 import numpy as np
 import pandas as pd
 import supervision as sv
+from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
 
 from src import config
+from src.homography import PitchDimensions
 
 JERSEY_FEATURE_COLUMNS: list[str] = ["L", "a", "b"]  # OpenCV 8-bit Lab
 
@@ -42,10 +49,22 @@ def jersey_colour(crop: np.ndarray) -> np.ndarray | None:
     return np.median(pixels, axis=0)
 
 
-def track_majority_class(tracks: pd.DataFrame) -> pd.Series:
-    """Most frequent class name per tracker ID (labels can flicker between frames)."""
+def track_roles(tracks: pd.DataFrame) -> pd.Series:
+    """Role (``player``/``goalkeeper``/``referee``) per tracker ID.
+
+    Detector labels flicker between frames, so roles are decided per track: the
+    most frequent class, except that ``goalkeeper`` wins whenever it reaches
+    ``config.GOALKEEPER_MIN_SHARE`` - the detector often calls goalkeepers
+    "player", but rarely calls an outfield player "goalkeeper".
+    """
     people = tracks[tracks["class_id"] != config.BALL_ID]
-    return people.groupby("tracker_id")["class_name"].agg(lambda s: s.mode().iat[0])
+
+    def role(classes: pd.Series) -> str:
+        if (classes == "goalkeeper").mean() >= config.GOALKEEPER_MIN_SHARE:
+            return "goalkeeper"
+        return classes.mode().iat[0]
+
+    return people.groupby("tracker_id")["class_name"].agg(role)
 
 
 def _sample_rows(tracks: pd.DataFrame, samples_per_track: int) -> pd.DataFrame:
@@ -75,8 +94,8 @@ def extract_jersey_features(
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
-    majority = track_majority_class(tracks)
-    outfield_ids = majority.index[majority.isin(["player", "goalkeeper"])]
+    roles = track_roles(tracks)
+    outfield_ids = roles.index[roles.isin(["player", "goalkeeper"])]
     candidates = tracks[tracks["tracker_id"].isin(outfield_ids)]
     if candidates.empty:
         return pd.DataFrame(columns=["frame_idx", "tracker_id", *JERSEY_FEATURE_COLUMNS])
@@ -161,9 +180,9 @@ def assign_teams(
         jersey_features: Output of ``extract_jersey_features``.
         random_state: K-Means seed, for reproducible results.
     """
-    majority = track_majority_class(tracks)
-    player_ids = majority.index[majority == "player"]
-    goalkeeper_ids = list(majority.index[majority == "goalkeeper"])
+    roles = track_roles(tracks)
+    player_ids = roles.index[roles == "player"]
+    goalkeeper_ids = list(roles.index[roles == "goalkeeper"])
 
     player_features = jersey_features[jersey_features["tracker_id"].isin(player_ids)]
     track_colours = player_features.groupby("tracker_id")[JERSEY_FEATURE_COLUMNS].median()
@@ -196,7 +215,199 @@ def assign_teams(
 
 
 def add_team_column(tracks: pd.DataFrame, assignment: TeamAssignment) -> pd.DataFrame:
-    """Add a ``team`` column (``NO_TEAM`` for referees, the ball and unassigned tracks)."""
+    """Add ``team`` (``NO_TEAM`` for referees, the ball and unassigned tracks) and
+    the per-track ``role`` (``"ball"`` for ball rows)."""
+    is_ball = tracks["class_id"] == config.BALL_ID
     team = tracks["tracker_id"].map(assignment.track_teams).fillna(config.NO_TEAM).astype(int)
-    team[tracks["class_id"] == config.BALL_ID] = config.NO_TEAM
-    return tracks.assign(team=team)
+    team[is_ball] = config.NO_TEAM
+    role = tracks["tracker_id"].map(track_roles(tracks)).where(~is_ball, "ball")
+    return tracks.assign(team=team, role=role)
+
+
+# =============================================================================
+# Formation detection
+# =============================================================================
+
+
+def formation_template(formation: str) -> np.ndarray:
+    """Normalised ``(depth, width)`` slots for a formation such as ``"4-2-3-1"``.
+
+    Depth runs 0 (defensive line) -> 1 (most advanced line); width 0 -> 1 across
+    the pitch. Lines are evenly spaced; players spread evenly within a line.
+    """
+    lines = [int(n) for n in formation.split("-")]
+    if sum(lines) != 10:
+        raise ValueError(f"Formation {formation!r} must have 10 outfield players")
+    slots = []
+    for i, count in enumerate(lines):
+        depth = i / (len(lines) - 1)
+        if count == 1:
+            widths = [0.5]
+        elif count == 2:
+            widths = [0.3, 0.7]  # pairs (e.g. strikers) play inside, not on the touchlines
+        else:
+            widths = np.linspace(0, 1, count)
+        slots.extend((depth, w) for w in widths)
+    return np.array(slots, dtype=float)
+
+
+def _roles(tracks: pd.DataFrame) -> pd.Series:
+    """Per-track ``role`` column if present, else the per-frame detector class."""
+    return tracks["role"] if "role" in tracks.columns else tracks["class_name"]
+
+
+def _normalise_shape(points: np.ndarray) -> np.ndarray:
+    """Scale points to the unit square so shape, not position or spread, is compared."""
+    mins = points.min(axis=0)
+    span = points.max(axis=0) - mins
+    return (points - mins) / np.where(span > 0, span, 1.0)
+
+
+def match_formation(
+    positions: np.ndarray, formations: tuple[str, ...] = config.FORMATIONS
+) -> dict[str, float]:
+    """Matching cost of each formation for ``(n, 2)`` outfield ``(depth, width)`` positions.
+
+    Each player is assigned to one template slot (Hungarian algorithm, so no
+    slot is used twice); the cost is the mean player-to-slot distance in
+    normalised units. With fewer than 10 players, the best subset of slots is used.
+    """
+    observed = _normalise_shape(positions)
+    costs = {}
+    for formation in formations:
+        template = formation_template(formation)
+        distances = np.linalg.norm(observed[:, None, :] - template[None, :, :], axis=2)
+        rows, cols = linear_sum_assignment(distances)
+        costs[formation] = float(distances[rows, cols].mean())
+    return costs
+
+
+def defending_sides(tracks: pd.DataFrame, pitch: PitchDimensions | None = None) -> dict[int, str]:
+    """Which goal (``"left"``/``"right"``) each team defends.
+
+    Uses the goalkeeper's average position when available. Otherwise the team
+    whose players are on average closer to the left goal is assumed to defend it,
+    since defenders stay goal-side of attackers.
+    """
+    pitch = pitch or PitchDimensions()
+    teams = (config.TEAM_A, config.TEAM_B)
+    located = tracks.dropna(subset=["pitch_x"])
+    sides: dict[int, str] = {}
+
+    goalkeepers = located[(_roles(located) == "goalkeeper") & located["team"].isin(teams)]
+    for team, gk_x in goalkeepers.groupby("team")["pitch_x"].mean().items():
+        sides[int(team)] = "left" if gk_x < pitch.length / 2 else "right"
+
+    if len(sides) == 1:  # the other team defends the opposite goal
+        known, side = next(iter(sides.items()))
+        sides[teams[1 - teams.index(known)]] = "right" if side == "left" else "left"
+    elif not sides:
+        mean_x = located[located["team"].isin(teams)].groupby("team")["pitch_x"].mean()
+        if len(mean_x) == 2:
+            left_team = int(mean_x.idxmin())
+            sides = {left_team: "left", teams[1 - teams.index(left_team)]: "right"}
+    return sides
+
+
+def to_attacking_frame(
+    tracks: pd.DataFrame, sides: dict[int, str], pitch: PitchDimensions | None = None
+) -> pd.DataFrame:
+    """Add ``depth``/``width`` so every team attacks towards +depth.
+
+    Teams defending the right goal are rotated 180 degrees, which keeps their
+    left/right sides consistent too.
+    """
+    pitch = pitch or PitchDimensions()
+    flip = tracks["team"].map({team: side == "right" for team, side in sides.items()})
+    flip = flip.fillna(False).astype(bool)
+    depth = np.where(flip, pitch.length - tracks["pitch_x"], tracks["pitch_x"])
+    width = np.where(flip, pitch.width - tracks["pitch_y"], tracks["pitch_y"])
+    return tracks.assign(depth=depth, width=width)
+
+
+@dataclass
+class FormationResult:
+    """Per-window formations for both teams."""
+
+    windows: pd.DataFrame  # one row per (team, window)
+    positions: pd.DataFrame  # average position per (team, window, player)
+
+    @property
+    def changes(self) -> pd.DataFrame:
+        """Windows where a team's (hysteresis-filtered) formation changed."""
+        rows = []
+        for team, group in self.windows.dropna(subset=["formation"]).groupby("team"):
+            previous = group["formation"].shift()
+            changed = group[previous.notna() & (group["formation"] != previous)]
+            for row, before in zip(changed.itertuples(), previous[changed.index]):
+                rows.append({"team": team, "time": row.start, "from": before, "to": row.formation})
+        return pd.DataFrame(rows, columns=["team", "time", "from", "to"])
+
+
+def detect_formations(
+    tracks: pd.DataFrame,
+    window_seconds: float = config.FORMATION_WINDOW_SECONDS,
+    min_players: int = config.FORMATION_MIN_PLAYERS,
+    min_presence: float = config.FORMATION_MIN_PRESENCE,
+    switch_margin: float = config.FORMATION_SWITCH_MARGIN,
+    formations: tuple[str, ...] = config.FORMATIONS,
+) -> FormationResult:
+    """Classify each team's formation in consecutive time windows.
+
+    Args:
+        tracks: Tracks with ``team`` and (ideally smoothed) ``pitch_x``/``pitch_y``.
+        window_seconds: Length of each analysis window.
+        min_players: Windows with fewer qualifying outfield players are left
+            unclassified (the broadcast camera rarely shows everyone).
+        min_presence: Share of a window's frames a player must appear in.
+        switch_margin: Hysteresis margin, see ``config.FORMATION_SWITCH_MARGIN``.
+        formations: Candidate formation templates.
+    """
+    sides = defending_sides(tracks)
+    start_time = tracks["timestamp"].min()
+    tracks = tracks.assign(window=((tracks["timestamp"] - start_time) // window_seconds).astype(int))
+    frames_per_window = tracks.groupby("window")["frame_idx"].nunique()
+
+    outfield = tracks[
+        (_roles(tracks) == "player")
+        & tracks["team"].isin([config.TEAM_A, config.TEAM_B])
+        & tracks["pitch_x"].notna()
+    ]
+    outfield = to_attacking_frame(outfield, sides)
+
+    window_rows, position_rows = [], []
+    for team, team_rows in outfield.groupby("team"):
+        current: str | None = None
+        for window, rows in team_rows.groupby("window"):
+            per_player = rows.groupby("tracker_id").agg(
+                depth=("depth", "mean"), width=("width", "mean"),
+                pitch_x=("pitch_x", "mean"), pitch_y=("pitch_y", "mean"),
+                frames=("frame_idx", "nunique"),
+            )
+            per_player["presence"] = per_player["frames"] / frames_per_window[window]
+            # Keep the 10 most visible; more than 10 means a duplicated ID.
+            players = per_player[per_player["presence"] >= min_presence].nlargest(10, "presence")
+
+            row = {
+                "team": int(team), "window": int(window),
+                "start": start_time + window * window_seconds,
+                "end": start_time + (window + 1) * window_seconds,
+                "n_players": len(players), "formation": None, "best_match": None,
+                "cost": np.nan, "runner_up": None, "confidence_margin": np.nan,
+                "defends": sides.get(int(team)),
+            }
+            if len(players) >= min_players:
+                costs = match_formation(players[["depth", "width"]].to_numpy(), formations)
+                best, runner_up = sorted(costs, key=costs.get)[:2]
+                if current is None or costs[current] - costs[best] > switch_margin:
+                    current = best
+                row.update(
+                    formation=current, best_match=best, cost=costs[current], runner_up=runner_up,
+                    # Small margins mean the shape sits between two templates.
+                    confidence_margin=costs[runner_up] - costs[best],
+                )
+            window_rows.append(row)
+            position_rows.append(players.reset_index().assign(team=int(team), window=int(window)))
+
+    positions = pd.concat(position_rows, ignore_index=True) if position_rows else pd.DataFrame()
+    return FormationResult(pd.DataFrame(window_rows), positions)

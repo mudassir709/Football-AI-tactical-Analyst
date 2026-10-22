@@ -168,7 +168,7 @@ class PitchKeypointDetector:
         self,
         weights_path: str | Path = config.PITCH_WEIGHTS,
         imgsz: int = config.PITCH_IMGSZ,
-        device: str | None = None,
+        device: str | None = config.DEVICE,
     ) -> None:
         weights_path = Path(weights_path)
         if not weights_path.exists():

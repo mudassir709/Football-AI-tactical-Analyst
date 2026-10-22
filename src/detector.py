@@ -25,7 +25,7 @@ class FootballDetector:
         imgsz: int = config.DEFAULT_IMGSZ,
         class_confidence: dict[int, float] | None = None,
         iou: float = config.NMS_IOU,
-        device: str | None = None,
+        device: str | None = config.DEVICE,
     ) -> None:
         """
         Args:
@@ -34,7 +34,8 @@ class FootballDetector:
             imgsz: Inference resolution (longest side, pixels).
             class_confidence: Per-class overrides for ``config.CLASS_CONFIDENCE``.
             iou: IoU threshold for YOLO's non-maximum suppression.
-            device: ``"cpu"``, ``"cuda:0"`` etc. ``None`` lets Ultralytics choose.
+            device: ``"cpu"``, ``"cuda:0"`` etc. ``None`` lets Ultralytics choose
+                (it prefers any CUDA GPU, even when the GPU is slower).
         """
         weights_path = Path(weights_path)
         # Bare names (no directory) may be official weights that YOLO downloads itself.

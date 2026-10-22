@@ -45,6 +45,12 @@ CLASS_ALIASES: dict[str, int] = {
     "referee": REFEREE_ID,
 }
 
+# --- Hardware ----------------------------------------------------------------
+# Inference device. Benchmarked on the dev laptop (i7-1255U vs GeForce MX550 2 GB):
+# the CPU was ~2x faster than the GPU for these YOLOv8 models, so default to CPU.
+# Set to "cuda:0" on machines with a stronger NVIDIA GPU.
+DEVICE: str = "cpu"
+
 # --- Detection defaults ------------------------------------------------------
 # The Roboflow model was trained at 1280px; the ball is only a few pixels wide,
 # so lowering this hurts ball recall noticeably.
@@ -99,3 +105,29 @@ TORSO_X_RANGE: tuple[float, float] = (0.25, 0.75)
 GRASS_HSV_LOWER: tuple[int, int, int] = (35, 40, 40)
 GRASS_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
 MIN_JERSEY_PIXELS: int = 30
+# A track is a goalkeeper if at least this share of its detections say so.
+GOALKEEPER_MIN_SHARE: float = 0.25
+
+# --- Trajectory defaults -----------------------------------------------------
+# Centred rolling mean over this span removes box jitter from pitch positions.
+SMOOTHING_WINDOW_SECONDS: float = 1.0
+# Ball gaps up to this long are filled by linear interpolation.
+BALL_MAX_GAP_SECONDS: float = 1.0
+
+# --- Formation defaults ------------------------------------------------------
+# Candidate formations (outfield lines from defence to attack).
+FORMATIONS: tuple[str, ...] = (
+    "4-4-2", "4-3-3", "4-2-3-1", "4-1-4-1", "4-5-1", "3-5-2", "3-4-3", "5-3-2", "5-4-1",
+)
+# Positions are averaged over windows of this length before matching. Short for
+# the 30 s sample clip; use 60-300 s for full matches.
+FORMATION_WINDOW_SECONDS: float = 5.0
+# A window is only classified if this many outfield players are visible...
+FORMATION_MIN_PLAYERS: int = 8
+# ...each for at least this share of the window's frames.
+FORMATION_MIN_PRESENCE: float = 0.5
+# Hysteresis: switch formation only when the new template's matching cost is
+# lower than the current one's by more than this (normalised pitch units). On
+# the sample clip, best-vs-runner-up gaps were 0.001-0.025, so 0.03 sits just
+# above that noise level.
+FORMATION_SWITCH_MARGIN: float = 0.03
