@@ -19,3 +19,5 @@ models/*.weights
 # IDE & Local Settings
 .vscode/
 .streamlit/secrets.toml
+# Pipeline outputs (preview videos, cached tracks)
+outputs/
