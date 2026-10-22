@@ -8,7 +8,6 @@ confident ball detection per frame and interpolate gaps later in the pipeline.
 
 from __future__ import annotations
 
-import itertools
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +20,7 @@ from trackers import ByteTrackTracker
 
 from src import config
 from src.detector import FootballDetector
+from src.video import get_video_info, iter_frame_batches
 
 # The ball is not tracked by ByteTrack; its rows get this placeholder ID.
 BALL_TRACK_ID: int = -1
@@ -125,23 +125,12 @@ def iter_tracks(
         max_frames: Stop after this many *processed* frames.
         batch_size: Frames per detector forward pass.
     """
-    video_path = Path(video_path)
-    if not video_path.exists():
-        raise FileNotFoundError(f"Video not found: {video_path}")
-    if stride < 1 or batch_size < 1:
-        raise ValueError("stride and batch_size must be >= 1")
-
-    video_info = sv.VideoInfo.from_video_path(str(video_path))
+    video_info = get_video_info(video_path)
     tracker = tracker or FootballTracker(frame_rate=video_info.fps)
 
-    end = video_info.total_frames
-    if max_frames is not None:
-        end = min(end, start + max_frames * stride)
-    frames = sv.get_video_frames_generator(str(video_path), stride=stride, start=start, end=end)
-    indexed_frames = zip(itertools.count(start, stride), frames)
-
-    for batch in itertools.batched(indexed_frames, batch_size):
-        frame_indices, images = zip(*batch)
+    for frame_indices, images in iter_frame_batches(
+        video_path, stride=stride, start=start, max_frames=max_frames, batch_size=batch_size
+    ):
         for frame_idx, image, detections in zip(
             frame_indices, images, detector.detect_batch(images)
         ):

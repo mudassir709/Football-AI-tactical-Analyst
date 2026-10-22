@@ -67,3 +67,19 @@ LOST_TRACK_BUFFER: int = 50
 TRACK_ACTIVATION_THRESHOLD: float = 0.5
 HIGH_CONF_DET_THRESHOLD: float = 0.5
 MINIMUM_CONSECUTIVE_FRAMES: int = 2
+
+# --- Homography defaults -----------------------------------------------------
+# Roboflow's pitch keypoint model (YOLOv8-pose, 32 landmarks, trained at 640px).
+PITCH_WEIGHTS: Path = MODELS_DIR / "football-pitch-detection.pt"
+PITCH_IMGSZ: int = 640
+PITCH_KEYPOINT_CONFIDENCE: float = 0.5
+MIN_HOMOGRAPHY_KEYPOINTS: int = 4
+# RANSAC tolerance in pitch metres: keypoints that land further than this from
+# their true pitch position are treated as outliers.
+HOMOGRAPHY_RANSAC_THRESHOLD: float = 1.0
+# Keypoints spanning less than this area (m^2) are nearly collinear and give an
+# unstable homography, e.g. when only the halfway line is visible.
+MIN_KEYPOINT_HULL_AREA: float = 50.0
+# When a frame has no usable keypoints, reuse the last homography for at most
+# this many processed frames; beyond that the camera has likely moved too far.
+MAX_HOMOGRAPHY_REUSE: int = 10
