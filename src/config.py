@@ -83,3 +83,19 @@ MIN_KEYPOINT_HULL_AREA: float = 50.0
 # When a frame has no usable keypoints, reuse the last homography for at most
 # this many processed frames; beyond that the camera has likely moved too far.
 MAX_HOMOGRAPHY_REUSE: int = 10
+
+# --- Team assignment defaults ------------------------------------------------
+# Team labels used in the tracks table.
+TEAM_A: int = 0
+TEAM_B: int = 1
+NO_TEAM: int = -1  # referees, ball, or players that could not be assigned
+# Jersey crops sampled per track; spread evenly over the track's lifetime.
+JERSEY_SAMPLES_PER_TRACK: int = 10
+# Torso region of a player box, as fractions of box height/width. Skips the
+# head and the shorts, which are often a different colour to the shirt.
+TORSO_Y_RANGE: tuple[float, float] = (0.15, 0.50)
+TORSO_X_RANGE: tuple[float, float] = (0.25, 0.75)
+# HSV range treated as grass and removed from crops (OpenCV hue is 0-179).
+GRASS_HSV_LOWER: tuple[int, int, int] = (35, 40, 40)
+GRASS_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
+MIN_JERSEY_PIXELS: int = 30
