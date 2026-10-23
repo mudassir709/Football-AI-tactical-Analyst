@@ -41,8 +41,15 @@ REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379")
 # Uploaded videos and results; relative paths are resolved from the repo root,
 # exactly like the API does, so both see the same files.
 STORAGE_DIR: Path = (REPO_ROOT / os.environ.get("STORAGE_DIR", "storage")).resolve()
-# Process every Nth frame of uploaded videos (2 halves processing time).
-PIPELINE_STRIDE: int = int(os.environ.get("PIPELINE_STRIDE", "2"))
+# Analysis modes offered when uploading. "stride": analyse every Nth frame;
+# "imgsz": detection resolution (lower is faster but misses more balls);
+# "pitch_every": run the pitch model on every Nth analysed frame and share its
+# homography with the frames around it (the broadcast camera moves smoothly).
+ANALYSIS_MODES: dict[str, dict[str, int]] = {
+    "standard": {"stride": 2, "imgsz": 1280, "pitch_every": 3},
+    "quick": {"stride": 5, "imgsz": 960, "pitch_every": 2},  # for live demos
+}
+DEFAULT_ANALYSIS_MODE: str = "standard"
 
 DEFAULT_VIDEO: Path = DATA_DIR / "sample.mp4"
 # Roboflow's pretrained football detector (classes: ball, goalkeeper, player, referee).

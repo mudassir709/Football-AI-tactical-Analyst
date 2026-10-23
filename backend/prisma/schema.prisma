@@ -33,12 +33,14 @@ model Match {
   id               String      @id @default(cuid())
   title            String
   status           MatchStatus @default(QUEUED)
+  analysisMode     String      @default("standard") // "standard" or "quick" (see worker config)
   progress         Int         @default(0) // 0-100, reported by the worker
   stage            String? // human-readable step, e.g. "Tracking players"
   errorMessage     String?
   originalFilename String
   fileSizeBytes    Int
-  videoPath        String // relative to STORAGE_DIR, e.g. "videos/abc.mp4"
+  videoPath        String // original upload, relative to STORAGE_DIR, e.g. "videos/abc.mp4"
+  playbackPath     String? // browser-playable H.264 copy made by the worker
   resultPath       String? // relative to STORAGE_DIR, e.g. "results/abc.json"
   summary          Json? // small headline numbers written when analysis completes
   report           String? // LLM coaching report (Markdown)

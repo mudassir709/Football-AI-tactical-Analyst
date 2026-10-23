@@ -41,8 +41,10 @@ async def process(job: Job, token: str) -> dict[str, Any]:
     """Analyse one uploaded match; the return value is sent back to the API."""
     match_id: str = job.data["matchId"]
     video = storage_path(job.data["videoPath"])
+    mode: str = job.data.get("mode", config.DEFAULT_ANALYSIS_MODE)
     result_relative = f"results/{match_id}.json"
-    logger.info("Job %s: analysing %s", match_id, video.name)
+    playback_relative = f"videos/{match_id}_web.mp4"
+    logger.info("Job %s: analysing %s (%s mode)", match_id, video.name, mode)
 
     loop = asyncio.get_running_loop()
 
@@ -55,10 +57,11 @@ async def process(job: Job, token: str) -> dict[str, Any]:
     # The pipeline is CPU-heavy, synchronous code. Running it in a thread keeps
     # the event loop free to renew the job's lock while the analysis runs.
     summary = await asyncio.to_thread(
-        run_analysis, video, storage_path(result_relative), on_progress
+        run_analysis, video, storage_path(result_relative), storage_path(playback_relative),
+        on_progress, mode,
     )
     logger.info("Job %s: done in %.0f s", match_id, summary["processingSeconds"])
-    return {"resultPath": result_relative, "summary": summary}
+    return {"resultPath": result_relative, "playbackPath": playback_relative, "summary": summary}
 
 
 async def main() -> None:

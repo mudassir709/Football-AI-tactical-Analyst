@@ -305,15 +305,26 @@ def homographies_to_dataframe(frames: Iterable[FrameHomography]) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-def project_tracks(tracks: pd.DataFrame, homographies: pd.DataFrame) -> pd.DataFrame:
+def project_tracks(
+    tracks: pd.DataFrame, homographies: pd.DataFrame, max_frame_gap: int = 0
+) -> pd.DataFrame:
     """Add ``pitch_x``/``pitch_y`` (metres) by projecting each foot point.
 
-    Fully vectorised: each row is projected with its own frame's matrix.
-    Rows whose frame has no homography get NaN.
+    Fully vectorised: each row is projected with its frame's matrix. With
+    ``max_frame_gap > 0``, homographies only computed for some frames are
+    shared with the frames around them (the nearest one within the gap is
+    used); this is how the pitch model can run on fewer frames than tracking.
+    Rows without a usable homography get NaN.
     """
-    merged = tracks.merge(
-        homographies[["frame_idx", *HOMOGRAPHY_COLUMNS]], on="frame_idx", how="left"
-    )
+    columns = homographies[["frame_idx", *HOMOGRAPHY_COLUMNS]].dropna()
+    if max_frame_gap > 0:
+        merged = pd.merge_asof(
+            tracks.reset_index(drop=True).sort_values("frame_idx"),
+            columns.sort_values("frame_idx"),
+            on="frame_idx", direction="nearest", tolerance=max_frame_gap,
+        ).sort_index()
+    else:
+        merged = tracks.merge(columns, on="frame_idx", how="left")
     h = merged[HOMOGRAPHY_COLUMNS].to_numpy()
     x, y = merged["foot_x"].to_numpy(), merged["foot_y"].to_numpy()
     w = h[:, 6] * x + h[:, 7] * y + h[:, 8]

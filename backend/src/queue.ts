@@ -13,14 +13,19 @@ import type { Match } from "./generated/prisma/client.ts";
 export const QUEUE_NAME = "match-analysis"; // must match the worker's queue name
 
 /** What the worker needs to know about a job. */
+export const ANALYSIS_MODES = ["standard", "quick"] as const;
+export type AnalysisMode = (typeof ANALYSIS_MODES)[number];
+
 export interface AnalysisJobData {
   matchId: string;
   videoPath: string; // relative to STORAGE_DIR
+  mode: AnalysisMode;
 }
 
 /** What the worker returns when a job succeeds. */
 interface AnalysisJobResult {
   resultPath: string; // relative to STORAGE_DIR
+  playbackPath: string; // browser-playable copy, relative to STORAGE_DIR
   summary: Record<string, unknown>;
 }
 
@@ -66,6 +71,10 @@ export async function countWorkers(): Promise<number> {
 }
 
 export async function enqueueAnalysis(data: AnalysisJobData): Promise<void> {
+  // BullMQ silently ignores a job whose ID already exists, and finished jobs
+  // are kept for history; remove the old one so re-analysis really runs.
+  const previous = await Job.fromId(analysisQueue, data.matchId);
+  if (previous && !(await previous.isActive())) await previous.remove();
   await analysisQueue.add("analyse", data, { jobId: data.matchId });
 }
 
@@ -82,10 +91,21 @@ export async function removeQueuedJob(matchId: string): Promise<void> {
 export function startQueueEventListener(onUpdate: (match: Match) => void): QueueEvents {
   const events = new QueueEvents(QUEUE_NAME, { connection: redisConnection() });
 
-  // Updates for matches deleted in the meantime are simply dropped.
-  const update = async (matchId: string, data: Parameters<typeof prisma.match.update>[0]["data"]) => {
-    const match = await prisma.match.update({ where: { id: matchId }, data }).catch(() => null);
-    if (match) onUpdate(match);
+  // Events often arrive in bursts. Each match's updates are chained so they are
+  // written and pushed in arrival order; otherwise a slower database write
+  // could finish last and make the progress bar jump backwards.
+  const chains = new Map<string, Promise<void>>();
+  const update = (matchId: string, data: Parameters<typeof prisma.match.update>[0]["data"]) => {
+    const next = (chains.get(matchId) ?? Promise.resolve()).then(async () => {
+      // Updates for matches deleted in the meantime are simply dropped.
+      const match = await prisma.match.update({ where: { id: matchId }, data }).catch(() => null);
+      if (match) onUpdate(match);
+    });
+    chains.set(matchId, next);
+    void next.finally(() => {
+      if (chains.get(matchId) === next) chains.delete(matchId);
+    });
+    return next;
   };
 
   events.on("active", ({ jobId }) => {
@@ -110,6 +130,7 @@ export function startQueueEventListener(onUpdate: (match: Match) => void): Queue
       progress: 100,
       stage: "Done",
       resultPath: result.resultPath,
+      playbackPath: result.playbackPath,
       summary: result.summary as object,
       completedAt: new Date(),
     });

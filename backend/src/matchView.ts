@@ -7,6 +7,7 @@ export function toPublicMatch(match: Match) {
     id: match.id,
     title: match.title,
     status: match.status,
+    analysisMode: match.analysisMode,
     progress: match.progress,
     stage: match.stage,
     errorMessage: match.errorMessage,

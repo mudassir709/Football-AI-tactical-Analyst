@@ -1,12 +1,13 @@
 """End-to-end analysis of one match video.
 
 ``run_analysis`` chains every stage of the pipeline, reports progress through a
-callback (the queue worker forwards it to the user's browser), writes the full
-results JSON consumed by the dashboard, and returns a small summary that the
-API stores in the database.
+callback (the queue worker forwards it to the user's browser), writes a
+browser-playable copy of the video and the full results JSON consumed by the
+dashboard, and returns a small summary that the API stores in the database.
 
 Stages and their share of the progress bar:
-    Detecting and tracking players    0-60 %   (YOLOv8 + ByteTrack)
+    Preparing video for playback      0-5 %    (H.264 re-encode)
+    Detecting and tracking players    5-60 %   (YOLOv8 + ByteTrack)
     Mapping positions to the pitch   60-88 %   (pitch keypoints + homography)
     Assigning teams                  88-93 %   (jersey colour clustering)
     Analysing tactics                93-98 %   (smoothing, formations, metrics)
@@ -38,6 +39,7 @@ from src.clustering import (
 )
 from src.detector import FootballDetector
 from src.homography import (
+    HOMOGRAPHY_COLUMNS,
     PitchDimensions,
     PitchKeypointDetector,
     homographies_to_dataframe,
@@ -46,6 +48,7 @@ from src.homography import (
 )
 from src.metrics import heatmap, player_stats, team_shape
 from src.tracker import frame_tracks_to_dataframe, iter_tracks
+from src.transcode import make_web_video
 from src.trajectories import interpolate_ball, smooth_positions
 from src.video import get_video_info
 
@@ -54,7 +57,7 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[float, str], None]
 T = TypeVar("T")
 
-RESULTS_VERSION = 1
+RESULTS_VERSION = 2  # 2: per-frame pitch -> image matrix "h"
 ROLE_CODES = {"player": 0, "goalkeeper": 1, "referee": 2}
 
 
@@ -93,40 +96,57 @@ class _Progress:
 def run_analysis(
     video_path: str | Path,
     output_path: str | Path,
+    playback_path: str | Path,
     progress: ProgressCallback | None = None,
-    stride: int = config.PIPELINE_STRIDE,
+    mode: str = config.DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, Any]:
     """Analyse a match video and write the dashboard results JSON.
 
     Args:
         video_path: Input video.
         output_path: Where to write the results JSON.
+        playback_path: Where to write the browser-playable (H.264) copy.
         progress: Called with ``(percent, stage)`` as work advances.
-        stride: Process every ``stride``-th frame.
+        mode: A key of ``config.ANALYSIS_MODES`` ("standard" or "quick").
 
     Returns:
         A JSON-serialisable summary of headline numbers.
     """
+    if mode not in config.ANALYSIS_MODES:
+        raise ValueError(f"Unknown analysis mode {mode!r}")
+    settings = config.ANALYSIS_MODES[mode]
+    stride, pitch_stride = settings["stride"], settings["stride"] * settings["pitch_every"]
+
     started = time.perf_counter()
     report = _Progress(progress)
     video_path, output_path = Path(video_path), Path(output_path)
     info = get_video_info(video_path)
-    expected_frames = math.ceil(info.total_frames / stride)
+
+    # 0. Browser-playable copy (fast; also fails early on unreadable videos)
+    playback_stage = "Preparing video for playback"
+    make_web_video(
+        video_path, playback_path,
+        on_frame=lambda done, total: report(5 * done / max(total, 1), playback_stage),
+    )
 
     # 1. Detection + tracking
-    frames = iter_tracks(video_path, _player_detector(), stride=stride)
+    detector = _player_detector()
+    detector.imgsz = settings["imgsz"]  # safe: the worker runs one job at a time
+    frames = iter_tracks(video_path, detector, stride=stride)
     tracks = frame_tracks_to_dataframe(
-        report.iterate(frames, expected_frames, 0, 60, "Detecting and tracking players")
+        report.iterate(frames, math.ceil(info.total_frames / stride), 5, 60,
+                       "Detecting and tracking players")
     )
     if tracks.empty:
         raise RuntimeError("No players were detected in this video")
 
-    # 2. Pitch coordinates
-    homography_frames = iter_homographies(video_path, _pitch_detector(), stride=stride)
+    # 2. Pitch coordinates (pitch model on fewer frames; homographies are shared)
+    homography_frames = iter_homographies(video_path, _pitch_detector(), stride=pitch_stride)
     homographies = homographies_to_dataframe(
-        report.iterate(homography_frames, expected_frames, 60, 88, "Mapping positions to the pitch")
+        report.iterate(homography_frames, math.ceil(info.total_frames / pitch_stride), 60, 88,
+                       "Mapping positions to the pitch")
     )
-    tracks = project_tracks(tracks, homographies)
+    tracks = project_tracks(tracks, homographies, max_frame_gap=pitch_stride)
 
     # 3. Teams
     report(88, "Assigning teams")
@@ -150,7 +170,9 @@ def run_analysis(
 
     # 5. Export
     report(98, "Saving results")
-    results = _build_results(info, stride, tracks, homographies, assignment, formations, shape, stats)
+    results = _build_results(
+        info, stride, pitch_stride, mode, tracks, homographies, assignment, formations, shape, stats
+    )
     _write_json_atomic(results, output_path)
     summary = _build_summary(info, tracks, assignment, formations, shape, stats, time.perf_counter() - started)
     report(100, "Done")
@@ -169,11 +191,37 @@ def _num(value: Any, digits: int = 2) -> float | None:
     return round(float(value), digits)
 
 
-def _build_frames(tracks: pd.DataFrame) -> list[dict[str, Any]]:
+def _pitch_to_image_matrices(
+    frame_indices: np.ndarray, homographies: pd.DataFrame, max_frame_gap: int
+) -> dict[int, list[float]]:
+    """For each frame, the 3x3 pitch -> image matrix (row-major), when available.
+
+    The dashboard uses it to draw pitch-space overlays (movement paths,
+    heatmaps) onto the current video frame even while the camera pans.
+    Frames without their own homography use the nearest one within the gap.
+    """
+    valid = homographies.dropna(subset=HOMOGRAPHY_COLUMNS).sort_values("frame_idx")
+    if valid.empty:
+        return {}
+    nearest = pd.merge_asof(
+        pd.DataFrame({"frame_idx": np.sort(frame_indices)}), valid,
+        on="frame_idx", direction="nearest", tolerance=max_frame_gap,
+    ).dropna(subset=HOMOGRAPHY_COLUMNS)
+    matrices = {}
+    for frame_idx, values in zip(nearest["frame_idx"], nearest[HOMOGRAPHY_COLUMNS].to_numpy()):
+        inverse = np.linalg.inv(values.reshape(3, 3))
+        inverse /= inverse[2, 2]  # normalise so the last entry is 1
+        # 7 significant digits: the perspective terms are tiny (~1e-5).
+        matrices[int(frame_idx)] = [float(f"{v:.7g}") for v in inverse.ravel()]
+    return matrices
+
+
+def _build_frames(tracks: pd.DataFrame, pitch_to_image: dict[int, list[float]]) -> list[dict[str, Any]]:
     """One entry per processed frame with every person and the ball.
 
     Person rows are compact arrays (see ``legend`` in the results file):
-    ``[id, team, role, x1, y1, x2, y2, pitch_x, pitch_y]``.
+    ``[id, team, role, x1, y1, x2, y2, pitch_x, pitch_y]``. ``h`` is the
+    frame's pitch -> image matrix, or null when the pitch was not recognised.
     """
     frames = []
     for frame_idx, group in tracks.groupby("frame_idx", sort=True):
@@ -187,12 +235,15 @@ def _build_frames(tracks: pd.DataFrame) -> list[dict[str, Any]]:
                 _num(row.x1, 0), _num(row.y1, 0), _num(row.x2, 0), _num(row.y2, 0),
                 _num(row.pitch_x), _num(row.pitch_y),
             ])
-        frames.append({"f": int(frame_idx), "t": _num(group["timestamp"].iat[0], 3), "p": people, "b": ball})
+        frames.append({
+            "f": int(frame_idx), "t": _num(group["timestamp"].iat[0], 3),
+            "p": people, "b": ball, "h": pitch_to_image.get(int(frame_idx)),
+        })
     return frames
 
 
 def _build_results(
-    info, stride: int, tracks: pd.DataFrame, homographies: pd.DataFrame,
+    info, stride: int, pitch_stride: int, mode: str, tracks: pd.DataFrame, homographies: pd.DataFrame,
     assignment: TeamAssignment | None, formations, shape: pd.DataFrame, stats: pd.DataFrame,
 ) -> dict[str, Any]:
     pitch = PitchDimensions()
@@ -244,18 +295,21 @@ def _build_results(
         "video": {
             "fps": info.fps, "width": info.width, "height": info.height,
             "totalFrames": info.total_frames, "durationSeconds": _num(info.total_frames / info.fps),
-            "stride": stride,
+            "stride": stride, "mode": mode,
         },
         "pitch": {"length": pitch.length, "width": pitch.width},
         "legend": {
             "person": ["id", "team", "role", "x1", "y1", "x2", "y2", "pitchX", "pitchY"],
             "ball": ["x", "y", "pitchX", "pitchY"],
+            "h": "per-frame pitch (metres) -> image (pixels) 3x3 matrix, row-major; null if unknown",
             "roles": {str(code): name for name, code in ROLE_CODES.items()},
             "team": "-1 = no team (referee or unassigned)",
             "heatmap": "rows = y cells from y=0 upwards, columns = x cells from x=0",
         },
         "teams": teams,
-        "frames": _build_frames(tracks),
+        "frames": _build_frames(
+            tracks, _pitch_to_image_matrices(tracks["frame_idx"].unique(), homographies, pitch_stride)
+        ),
         "players": players,
         "teamShape": [
             {

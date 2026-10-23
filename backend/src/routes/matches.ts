@@ -4,6 +4,7 @@
 //   GET    /api/matches/:id          one match
 //   GET    /api/matches/:id/video    stream the video (supports seeking)
 //   GET    /api/matches/:id/results  full analysis JSON (tracks, heatmaps, formations...)
+//   POST   /api/matches/:id/reanalyse  queue the analysis again (optionally another mode)
 //   DELETE /api/matches/:id          delete a match and its files
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -14,7 +15,7 @@ import { requireAuth } from "../auth.ts";
 import { config } from "../config.ts";
 import { prisma } from "../db.ts";
 import { toPublicMatch } from "../matchView.ts";
-import { enqueueAnalysis, removeQueuedJob } from "../queue.ts";
+import { ANALYSIS_MODES, enqueueAnalysis, removeQueuedJob, type AnalysisMode } from "../queue.ts";
 import { VIDEO_DIR, absolutePath, isVideoFile, removeFile } from "../storage.ts";
 
 export const matchesRouter = Router();
@@ -38,7 +39,11 @@ const upload = multer({
   },
 });
 
-const UploadBody = z.object({ title: z.string().trim().max(120).optional() });
+const UploadBody = z.object({
+  title: z.string().trim().max(120).optional(),
+  // "quick" analyses fewer frames at lower resolution: much faster, less precise.
+  mode: z.enum(ANALYSIS_MODES).default("standard"),
+});
 
 /** Load a match owned by the logged-in user, or answer 404 and return null. */
 async function findOwnMatch(req: Request, res: Response) {
@@ -63,10 +68,16 @@ matchesRouter.post("/", upload.single("video"), async (req, res) => {
     return;
   }
 
-  const { title } = UploadBody.parse(req.body);
+  const parsedBody = UploadBody.safeParse(req.body);
+  if (!parsedBody.success) {
+    await removeFile(videoPath);
+    throw parsedBody.error;
+  }
+  const { title, mode } = parsedBody.data;
   let match = await prisma.match.create({
     data: {
       title: title || path.parse(file.originalname).name,
+      analysisMode: mode,
       originalFilename: file.originalname,
       fileSizeBytes: file.size,
       videoPath,
@@ -75,7 +86,7 @@ matchesRouter.post("/", upload.single("video"), async (req, res) => {
   });
 
   try {
-    await enqueueAnalysis({ matchId: match.id, videoPath });
+    await enqueueAnalysis({ matchId: match.id, videoPath, mode });
   } catch (error) {
     match = await prisma.match.update({
       where: { id: match.id },
@@ -101,9 +112,10 @@ matchesRouter.get("/:id", async (req, res) => {
 
 matchesRouter.get("/:id/video", async (req, res) => {
   const match = await findOwnMatch(req, res);
-  // sendFile handles HTTP Range requests, which the browser's video player
-  // uses to seek without downloading the whole file.
-  if (match) res.sendFile(absolutePath(match.videoPath));
+  // Prefer the worker's H.264 copy: the original may use a codec browsers
+  // cannot play. sendFile handles HTTP Range requests, which the browser's
+  // video player uses to seek without downloading the whole file.
+  if (match) res.sendFile(absolutePath(match.playbackPath ?? match.videoPath));
 });
 
 matchesRouter.get("/:id/results", async (req, res) => {
@@ -116,6 +128,26 @@ matchesRouter.get("/:id/results", async (req, res) => {
   res.sendFile(absolutePath(match.resultPath));
 });
 
+// Run the analysis again on the stored video, e.g. after a pipeline upgrade
+// or in a different mode. The previous results stay until the new ones are ready.
+const ReanalyseBody = z.object({ mode: z.enum(ANALYSIS_MODES).optional() });
+
+matchesRouter.post("/:id/reanalyse", async (req, res) => {
+  const match = await findOwnMatch(req, res);
+  if (!match) return;
+  if (match.status === "QUEUED" || match.status === "PROCESSING") {
+    res.status(409).json({ error: "This match is already being analysed" });
+    return;
+  }
+  const { mode = match.analysisMode as AnalysisMode } = ReanalyseBody.parse(req.body ?? {});
+  await enqueueAnalysis({ matchId: match.id, videoPath: match.videoPath, mode });
+  const updated = await prisma.match.update({
+    where: { id: match.id },
+    data: { status: "QUEUED", analysisMode: mode, progress: 0, stage: null, errorMessage: null },
+  });
+  res.json({ match: toPublicMatch(updated) });
+});
+
 matchesRouter.delete("/:id", async (req, res) => {
   const match = await findOwnMatch(req, res);
   if (!match) return;
@@ -125,6 +157,10 @@ matchesRouter.delete("/:id", async (req, res) => {
   }
   await removeQueuedJob(match.id);
   await prisma.match.delete({ where: { id: match.id } });
-  await Promise.all([removeFile(match.videoPath), removeFile(match.resultPath)]);
+  await Promise.all([
+    removeFile(match.videoPath),
+    removeFile(match.playbackPath),
+    removeFile(match.resultPath),
+  ]);
   res.status(204).end();
 });

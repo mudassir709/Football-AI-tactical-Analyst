@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* App-wide defaults: dark "analysis room" look with a pitch-green accent. */
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
+  }
+}

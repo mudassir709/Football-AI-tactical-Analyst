@@ -37,7 +37,13 @@ can be added to process several videos at once.
 | API | Node.js, Express, TypeScript | Login, uploads, match data, WebSockets |
 | ORM | Prisma | Typed database access from TypeScript |
 | Worker | Python, BullMQ for Python | Runs `worker/src/pipeline.py` per job |
-| File storage | `storage/` folder | `videos/` (uploads) and `results/` (analysis JSON) |
+| File storage | `storage/` folder | `videos/` (uploads and their H.264 playback copies) and `results/` (analysis JSON) |
+
+**Why a playback copy?** Browsers only play a few video codecs reliably.
+Uploads can be HEVC from phones, old MPEG-4, AVI and more, so the worker's
+first step re-encodes every upload to H.264 MP4 (`videos/<id>_web.mp4`),
+frame for frame at the same frame rate so the analysis overlays stay in sync.
+The video player always streams this copy.
 
 ## Security measures
 
