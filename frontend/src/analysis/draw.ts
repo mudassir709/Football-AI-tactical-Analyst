@@ -128,8 +128,10 @@ export function drawVideoOverlay(
     for (const person of state.people) {
       if (selectedId !== null && person.id !== selectedId) continue;
       const trail = timeline.trail(person.id, state.time, TRAIL_SECONDS);
-      if (person.pitch) trail.push(person.pitch);
       const points = trail.map(pitchToCanvas).filter((p): p is Point => p !== null);
+      // End at the detected feet, not the smoothed pitch position, which lags
+      // a few pixels behind during sprints; the path then always meets the marker.
+      points.push(toCanvas(person.foot));
       const colour = personColour(results, person.team, person.role);
       fadingPath(ctx, points, colour, person.id === selectedId ? lineWidth * 1.6 : lineWidth);
     }
@@ -169,9 +171,9 @@ export function drawVideoOverlay(
   // 5. Ball: short trail plus a marker above it.
   if (layers.ball && state.ball) {
     if (h) {
-      const trail = timeline.ballTrail(state.time, 1.5);
-      if (state.ball.pitch) trail.push(state.ball.pitch);
-      fadingPath(ctx, trail.map(pitchToCanvas).filter((p): p is Point => p !== null), "#ffffff", lineWidth * 0.8);
+      const trail = timeline.ballTrail(state.time, 1.5).map(pitchToCanvas).filter((p): p is Point => p !== null);
+      if (state.ball.image) trail.push(toCanvas(state.ball.image));
+      fadingPath(ctx, trail, "#ffffff", lineWidth * 0.8);
     }
     if (state.ball.image) {
       const [bx, by] = toCanvas(state.ball.image);
