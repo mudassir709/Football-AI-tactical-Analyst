@@ -6,13 +6,43 @@ change values in one place.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # --- Paths -------------------------------------------------------------------
-PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
+PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent  # worker/
+REPO_ROOT: Path = PROJECT_ROOT.parent
 DATA_DIR: Path = PROJECT_ROOT / "data"
 MODELS_DIR: Path = PROJECT_ROOT / "models"
 OUTPUT_DIR: Path = PROJECT_ROOT / "outputs"
+
+
+def _load_env_file(path: Path) -> None:
+    """Load KEY=VALUE lines into os.environ without overriding real variables.
+
+    Locally, settings live in the shared .env at the repository root; in Docker
+    they arrive as real environment variables, which take precedence.
+    """
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"'))
+
+
+_load_env_file(REPO_ROOT / ".env")
+
+# --- Platform integration ----------------------------------------------------
+# Must match the API's queue name (backend/src/queue.ts).
+QUEUE_NAME: str = "match-analysis"
+REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379")
+# Uploaded videos and results; relative paths are resolved from the repo root,
+# exactly like the API does, so both see the same files.
+STORAGE_DIR: Path = (REPO_ROOT / os.environ.get("STORAGE_DIR", "storage")).resolve()
+# Process every Nth frame of uploaded videos (2 halves processing time).
+PIPELINE_STRIDE: int = int(os.environ.get("PIPELINE_STRIDE", "2"))
 
 DEFAULT_VIDEO: Path = DATA_DIR / "sample.mp4"
 # Roboflow's pretrained football detector (classes: ball, goalkeeper, player, referee).
@@ -131,3 +161,10 @@ FORMATION_MIN_PRESENCE: float = 0.5
 # the sample clip, best-vs-runner-up gaps were 0.001-0.025, so 0.03 sits just
 # above that noise level.
 FORMATION_SWITCH_MARGIN: float = 0.03
+
+# --- Metrics defaults --------------------------------------------------------
+# Heatmap grid over the 105 x 68 m pitch: 21 x 14 cells of 5 x ~4.9 m.
+HEATMAP_BINS: tuple[int, int] = (21, 14)
+# Steps implying a faster speed are tracking glitches (ID jumps), not running;
+# elite sprinters peak around 10-11 m/s.
+MAX_PLAYER_SPEED: float = 12.0

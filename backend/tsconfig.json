@@ -1,0 +1,17 @@
+{
+  // TypeScript is only used for type checking (`npm run typecheck`);
+  // the code is executed directly by `tsx`, so nothing is compiled to disk.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["src", "prisma.config.ts"]
+}

@@ -1,0 +1,94 @@
+"""AI worker: takes match-analysis jobs from the Redis queue and runs the pipeline.
+
+Run from the worker/ folder:
+    python worker.py
+
+The worker processes one job at a time (the models already use every CPU
+core). Progress is reported through BullMQ, which the API forwards to the
+user's browser over WebSockets. If the worker crashes mid-job, BullMQ notices
+the job's lock has expired and hands it to a worker again.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import signal
+import socket
+import sys
+from pathlib import Path
+from typing import Any
+
+from bullmq import Job, Worker
+
+from src import config
+from src.pipeline import run_analysis
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("worker")
+
+
+def storage_path(relative: str) -> Path:
+    """Resolve a storage-relative path, refusing anything outside STORAGE_DIR."""
+    path = (config.STORAGE_DIR / relative).resolve()
+    if not path.is_relative_to(config.STORAGE_DIR):
+        raise ValueError(f"Path outside storage: {relative}")
+    return path
+
+
+async def process(job: Job, token: str) -> dict[str, Any]:
+    """Analyse one uploaded match; the return value is sent back to the API."""
+    match_id: str = job.data["matchId"]
+    video = storage_path(job.data["videoPath"])
+    result_relative = f"results/{match_id}.json"
+    logger.info("Job %s: analysing %s", match_id, video.name)
+
+    loop = asyncio.get_running_loop()
+
+    def on_progress(percent: float, stage: str) -> None:
+        # Called from the analysis thread; hand the update to the event loop.
+        asyncio.run_coroutine_threadsafe(
+            job.updateProgress({"percent": round(percent, 1), "stage": stage}), loop
+        )
+
+    # The pipeline is CPU-heavy, synchronous code. Running it in a thread keeps
+    # the event loop free to renew the job's lock while the analysis runs.
+    summary = await asyncio.to_thread(
+        run_analysis, video, storage_path(result_relative), on_progress
+    )
+    logger.info("Job %s: done in %.0f s", match_id, summary["processingSeconds"])
+    return {"resultPath": result_relative, "summary": summary}
+
+
+async def main() -> None:
+    worker = Worker(
+        config.QUEUE_NAME,
+        process,
+        {
+            "connection": config.REDIS_URL,
+            "concurrency": 1,
+            # Unique per process so the API's health check can count workers.
+            "name": f"python-ai-worker-{socket.gethostname()}-{os.getpid()}",
+            # Analysis can be slow on CPU; a longer lock tolerates brief stalls.
+            "lockDuration": 120_000,
+        },
+    )
+    logger.info("Worker listening on queue '%s' (storage: %s)", config.QUEUE_NAME, config.STORAGE_DIR)
+
+    stop = asyncio.Event()
+    if sys.platform != "win32":  # Windows has no loop signal handlers; Ctrl+C raises instead
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+    try:
+        await stop.wait()
+    finally:
+        logger.info("Shutting down worker")
+        await worker.close()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

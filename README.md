@@ -26,10 +26,14 @@ them on every push.
 
 | Folder | Contents | Status |
 |---|---|---|
-| `worker/` | Python AI pipeline (YOLOv8, ByteTrack, homography, clustering) | Pipeline complete; queue consumer next |
-| `backend/` | Node.js + Express API, authentication, job management | Planned |
+| `worker/` | Python AI pipeline (YOLOv8, ByteTrack, homography, clustering) and queue worker | Working end to end |
+| `backend/` | Node.js + Express API: authentication, uploads, job queue, WebSockets | Working end to end |
 | `frontend/` | React + TypeScript dashboard | Planned |
 | `docs/` | Architecture, requirements and thesis documentation | In progress |
+| `docker-compose.yml` | PostgreSQL and Redis containers | Working |
+
+To run the platform locally, see
+[docs/how-it-works/02-backend-queue-worker.md](docs/how-it-works/02-backend-queue-worker.md).
 
 ### AI worker modules (`worker/src/`)
 
@@ -42,6 +46,9 @@ them on every push.
 | `homography.py` | Pitch keypoints -> per-frame homography -> pitch coordinates in metres |
 | `clustering.py` | Team assignment by jersey colour; formation detection |
 | `trajectories.py` | Position smoothing and ball gap interpolation |
+| `metrics.py` | Team compactness, player distance and speed, heatmaps |
+| `pipeline.py` | Runs every stage on one video, reports progress, writes the results JSON |
+| `../worker.py` | Queue worker: takes analysis jobs from Redis and runs the pipeline |
 
 ## Running the AI pipeline (worker)
 

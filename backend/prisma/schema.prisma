@@ -1,0 +1,53 @@
+// Database schema. Each `model` becomes a table in PostgreSQL.
+// After editing this file run:  npm run db:migrate
+// (creates a migration, applies it, and regenerates the typed client).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Lifecycle of an uploaded match:
+// QUEUED -> PROCESSING -> COMPLETED, or FAILED if the worker hits an error.
+enum MatchStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String // bcrypt hash; the plain password is never stored
+  createdAt    DateTime @default(now())
+  matches      Match[]
+}
+
+model Match {
+  id               String      @id @default(cuid())
+  title            String
+  status           MatchStatus @default(QUEUED)
+  progress         Int         @default(0) // 0-100, reported by the worker
+  stage            String? // human-readable step, e.g. "Tracking players"
+  errorMessage     String?
+  originalFilename String
+  fileSizeBytes    Int
+  videoPath        String // relative to STORAGE_DIR, e.g. "videos/abc.mp4"
+  resultPath       String? // relative to STORAGE_DIR, e.g. "results/abc.json"
+  summary          Json? // small headline numbers written when analysis completes
+  report           String? // LLM coaching report (Markdown)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  completedAt      DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@index([userId, createdAt])
+}
