@@ -1,0 +1,22 @@
+# Packages for the GPU analysis service (worker/gpu_server.py) on a cloud GPU
+# machine such as RunPod. PyTorch with CUDA is NOT listed: GPU images ship a
+# build matched to their CUDA driver, and reinstalling it could break that.
+#
+# Packages whose APIs our code relies on are pinned; the rest only have lower
+# bounds so pip can pick versions that suit the machine's Python (3.10+).
+
+ultralytics==8.4.183
+supervision==0.31.1
+trackers==2.6.1
+
+numpy>=1.26
+pandas>=2.2
+pyarrow>=15
+scipy>=1.11
+scikit-learn>=1.4
+opencv-python-headless>=4.9
+av>=12
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+gdown>=5

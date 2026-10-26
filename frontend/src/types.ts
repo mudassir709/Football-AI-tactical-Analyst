@@ -30,6 +30,7 @@ export interface MatchSummary {
   ballDetectionRate: number;
   teams: TeamSummary[];
   formationChanges: number;
+  processedOn?: string; // e.g. "CPU" or "GPU (NVIDIA GeForce RTX 3090)"
 }
 
 export interface Match {

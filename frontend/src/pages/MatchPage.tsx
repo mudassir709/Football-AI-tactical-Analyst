@@ -112,7 +112,11 @@ function SummaryPanel({ match }: { match: Match }) {
         <Stat label="Clip length" value={formatDuration(summary.durationSeconds)} />
         <Stat label="Frames analysed" value={summary.framesAnalysed} />
         <Stat label="Ball detected" value={formatPercent(summary.ballDetectionRate)} hint="of analysed frames" />
-        <Stat label="Processing time" value={formatDuration(summary.processingSeconds)} />
+        <Stat
+          label="Processing time"
+          value={formatDuration(summary.processingSeconds)}
+          hint={summary.processedOn ? `on ${summary.processedOn}` : undefined}
+        />
       </Card>
       <div className="grid gap-4 md:grid-cols-2">
         {summary.teams.map((team) => (

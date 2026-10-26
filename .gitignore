@@ -37,3 +37,6 @@ storage/
 
 # IDE & Local Settings
 .vscode/
+
+# GPU service upload bundle (worker/gpu/make_bundle.py)
+tactical-eye-gpu.zip

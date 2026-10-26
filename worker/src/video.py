@@ -43,6 +43,9 @@ def iter_frame_batches(
         end = min(end, start + max_frames * stride)
     frames = sv.get_video_frames_generator(str(video_path), stride=stride, start=start, end=end)
 
-    for batch in itertools.batched(zip(itertools.count(start, stride), frames), batch_size):
+    indexed = zip(itertools.count(start, stride), frames)
+    # Equivalent to itertools.batched (Python 3.12+), kept compatible with the
+    # Python 3.11 images used on cloud GPU machines.
+    while batch := list(itertools.islice(indexed, batch_size)):
         frame_indices, images = zip(*batch)
         yield frame_indices, images

@@ -7,6 +7,10 @@ The worker processes one job at a time (the models already use every CPU
 core). Progress is reported through BullMQ, which the API forwards to the
 user's browser over WebSockets. If the worker crashes mid-job, BullMQ notices
 the job's lock has expired and hands it to a worker again.
+
+If GPU_SERVER_URL is set, the heavy analysis is offloaded to the remote GPU
+analysis service (gpu_server.py); when that service cannot be reached, the
+job is analysed locally instead.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from bullmq import Job, Worker
 
 from src import config
 from src.pipeline import run_analysis
+from src.remote import RemoteUnavailable, run_remote_analysis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("worker")
@@ -54,13 +59,23 @@ async def process(job: Job, token: str) -> dict[str, Any]:
             job.updateProgress({"percent": round(percent, 1), "stage": stage}), loop
         )
 
-    # The pipeline is CPU-heavy, synchronous code. Running it in a thread keeps
-    # the event loop free to renew the job's lock while the analysis runs.
-    summary = await asyncio.to_thread(
-        run_analysis, video, storage_path(result_relative), storage_path(playback_relative),
-        on_progress, mode,
-    )
-    logger.info("Job %s: done in %.0f s", match_id, summary["processingSeconds"])
+    outputs = (storage_path(result_relative), storage_path(playback_relative))
+    # Both paths are slow, synchronous code. Running them in a thread keeps the
+    # event loop free to renew the job's lock while the analysis runs.
+    summary = None
+    if config.GPU_SERVER_URL:
+        try:
+            summary = await asyncio.to_thread(
+                run_remote_analysis, config.GPU_SERVER_URL, config.GPU_SERVER_TOKEN,
+                video, *outputs, on_progress, mode,
+            )
+        except RemoteUnavailable as exc:
+            # Nothing ran remotely, so analysing here instead is safe.
+            logger.warning("Job %s: %s; analysing locally instead", match_id, exc)
+    if summary is None:
+        summary = await asyncio.to_thread(run_analysis, video, *outputs, on_progress, mode)
+
+    logger.info("Job %s: done in %.0f s on %s", match_id, summary["processingSeconds"], summary.get("processedOn"))
     return {"resultPath": result_relative, "playbackPath": playback_relative, "summary": summary}
 
 

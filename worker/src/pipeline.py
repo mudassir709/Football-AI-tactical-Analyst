@@ -62,6 +62,16 @@ ROLE_CODES = {"player": 0, "goalkeeper": 1, "referee": 2}
 
 
 @cache
+def describe_device() -> str:
+    """Human-readable name of the inference device, shown in the dashboard."""
+    if config.DEVICE.startswith("cuda"):
+        import torch
+
+        return f"GPU ({torch.cuda.get_device_name(torch.device(config.DEVICE))})"
+    return "CPU"
+
+
+@cache
 def _player_detector() -> FootballDetector:
     """Load the detection model once per worker process, not once per job."""
     return FootballDetector()
@@ -380,4 +390,5 @@ def _build_summary(
         "ballDetectionRate": _num(detected_ball / max(n_frames, 1), 3),
         "teams": teams,
         "formationChanges": int(len(formations.changes)) if formations else 0,
+        "processedOn": describe_device(),
     }

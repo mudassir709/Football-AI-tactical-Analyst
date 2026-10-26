@@ -51,6 +51,12 @@ ANALYSIS_MODES: dict[str, dict[str, int]] = {
 }
 DEFAULT_ANALYSIS_MODE: str = "standard"
 
+# Optional remote GPU analysis service (worker/gpu_server.py, e.g. on RunPod).
+# When GPU_SERVER_URL is set, the worker sends videos there and falls back to
+# local analysis if the service cannot be reached. Both sides share the token.
+GPU_SERVER_URL: str = os.environ.get("GPU_SERVER_URL", "").rstrip("/")
+GPU_SERVER_TOKEN: str = os.environ.get("GPU_SERVER_TOKEN", "")
+
 DEFAULT_VIDEO: Path = DATA_DIR / "sample.mp4"
 # Roboflow's pretrained football detector (classes: ball, goalkeeper, player, referee).
 DEFAULT_WEIGHTS: Path = MODELS_DIR / "football-player-detection.pt"
@@ -85,8 +91,9 @@ CLASS_ALIASES: dict[str, int] = {
 # --- Hardware ----------------------------------------------------------------
 # Inference device. Benchmarked on the dev laptop (i7-1255U vs GeForce MX550 2 GB):
 # the CPU was ~2x faster than the GPU for these YOLOv8 models, so default to CPU.
-# Set to "cuda:0" on machines with a stronger NVIDIA GPU.
-DEVICE: str = "cpu"
+# Set DEVICE=cuda:0 (environment variable) on machines with a stronger NVIDIA GPU,
+# such as the cloud GPU analysis service.
+DEVICE: str = os.environ.get("DEVICE", "cpu")
 
 # --- Detection defaults ------------------------------------------------------
 # The Roboflow model was trained at 1280px; the ball is only a few pixels wide,
