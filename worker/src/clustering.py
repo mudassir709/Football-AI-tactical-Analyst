@@ -29,8 +29,33 @@ from src.homography import PitchDimensions
 JERSEY_FEATURE_COLUMNS: list[str] = ["L", "a", "b"]  # OpenCV 8-bit Lab
 
 
-def jersey_colour(crop: np.ndarray) -> np.ndarray | None:
+def local_grass_lab(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> np.ndarray | None:
+    """Median Lab colour of the grass in a ring around a player's box.
+
+    Measuring the pitch next to each player (instead of assuming a fixed
+    "green") copes with mowing stripes, shadows and floodlights, and lets
+    green kits be told apart from the grass they stand on.
+    """
+    frame_h, frame_w = frame.shape[:2]
+    margin_x = int((x2 - x1) * config.GRASS_RING_MARGIN)
+    margin_y = int((y2 - y1) * config.GRASS_RING_MARGIN / 3)
+    ox1, oy1 = max(x1 - margin_x, 0), max(y1 - margin_y, 0)
+    ox2, oy2 = min(x2 + margin_x, frame_w), min(y2 + margin_y, frame_h)
+    ring = np.ones((oy2 - oy1, ox2 - ox1), dtype=bool)
+    ring[y1 - oy1:y2 - oy1, x1 - ox1:x2 - ox1] = False  # exclude the player's own box
+    if ring.sum() < config.MIN_JERSEY_PIXELS:
+        return None
+    lab = cv2.cvtColor(frame[oy1:oy2, ox1:ox2], cv2.COLOR_BGR2LAB)
+    return np.median(lab[ring], axis=0)
+
+
+def jersey_colour(crop: np.ndarray, grass_lab: np.ndarray | None = None) -> np.ndarray | None:
     """Median Lab colour of the shirt in a BGR player crop, ignoring grass.
+
+    Args:
+        grass_lab: The pitch colour around this player (``local_grass_lab``).
+            Pixels close to it are treated as grass. Without it, a fixed
+            green range is used, which also removes green shirts.
 
     Returns ``None`` if too few shirt pixels are visible.
     """
@@ -41,9 +66,17 @@ def jersey_colour(crop: np.ndarray) -> np.ndarray | None:
     if torso.size == 0:
         return None
 
-    hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
-    grass = cv2.inRange(hsv, config.GRASS_HSV_LOWER, config.GRASS_HSV_UPPER).astype(bool)
-    pixels = cv2.cvtColor(torso, cv2.COLOR_BGR2LAB)[~grass]
+    lab = cv2.cvtColor(torso, cv2.COLOR_BGR2LAB)
+    if grass_lab is not None:
+        # Brightness counts half, so lighter/darker mowing stripes still match
+        # the grass while a bright lime shirt does not.
+        diff = lab.astype(np.float32) - grass_lab.astype(np.float32)
+        diff[..., 0] *= config.GRASS_L_WEIGHT
+        grass = np.linalg.norm(diff, axis=-1) < config.GRASS_LAB_DISTANCE
+    else:
+        hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+        grass = cv2.inRange(hsv, config.GRASS_HSV_LOWER, config.GRASS_HSV_UPPER).astype(bool)
+    pixels = lab[~grass]
     if len(pixels) < config.MIN_JERSEY_PIXELS:
         return None
     return np.median(pixels, axis=0)
@@ -114,7 +147,10 @@ def extract_jersey_features(
         for det in group.itertuples():
             x1, y1 = max(int(det.x1), 0), max(int(det.y1), 0)
             x2, y2 = min(int(det.x2), frame_w), min(int(det.y2), frame_h)
-            colour = jersey_colour(frame[y1:y2, x1:x2])
+            if x2 <= x1 or y2 <= y1:
+                continue
+            grass = local_grass_lab(frame, x1, y1, x2, y2)
+            colour = jersey_colour(frame[y1:y2, x1:x2], grass)
             if colour is not None:
                 rows.append((frame_idx, det.tracker_id, *colour))
     return pd.DataFrame(rows, columns=["frame_idx", "tracker_id", *JERSEY_FEATURE_COLUMNS])

@@ -217,11 +217,25 @@ def _pitch_to_image_matrices(
         pd.DataFrame({"frame_idx": np.sort(frame_indices)}), valid,
         on="frame_idx", direction="nearest", tolerance=max_frame_gap,
     ).dropna(subset=HOMOGRAPHY_COLUMNS)
+    pitch = PitchDimensions()
+    centre = np.array([pitch.length / 2, pitch.width / 2, 1.0])
     matrices = {}
     for frame_idx, values in zip(nearest["frame_idx"], nearest[HOMOGRAPHY_COLUMNS].to_numpy()):
-        inverse = np.linalg.inv(values.reshape(3, 3))
-        inverse /= inverse[2, 2]  # normalise so the last entry is 1
-        # 7 significant digits: the perspective terms are tiny (~1e-5).
+        try:
+            inverse = np.linalg.inv(values.reshape(3, 3))
+        except np.linalg.LinAlgError:
+            continue
+        # Homographies are only defined up to scale. Scale to unit length rather
+        # than dividing by the last entry, which can be ~0 for extreme camera
+        # angles (that produced NaN/inf and failed a whole analysis). The sign
+        # is chosen so pitch points get a positive depth (w > 0), which the
+        # dashboard uses to tell points in front of the camera from those behind.
+        inverse /= np.linalg.norm(inverse)
+        if inverse[2] @ centre < 0:
+            inverse = -inverse
+        if not np.all(np.isfinite(inverse)):
+            continue
+        # 7 significant digits: the perspective terms are tiny.
         matrices[int(frame_idx)] = [float(f"{v:.7g}") for v in inverse.ravel()]
     return matrices
 
@@ -343,8 +357,30 @@ def _xy(rows: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     return rows["pitch_x"].to_numpy(dtype=float), rows["pitch_y"].to_numpy(dtype=float)
 
 
+def _replace_non_finite(value: Any, counter: list[int]) -> Any:
+    """Recursively turn NaN/inf floats into None (JSON has no NaN), counting them."""
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return value
+        counter[0] += 1
+        return None
+    if isinstance(value, dict):
+        return {k: _replace_non_finite(v, counter) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_non_finite(v, counter) for v in value]
+    return value
+
+
 def _write_json_atomic(data: dict[str, Any], path: Path) -> None:
-    """Write to a temporary file first, so readers never see a half-written file."""
+    """Write to a temporary file first, so readers never see a half-written file.
+
+    Safety net: any NaN/inf that slipped through becomes null instead of
+    failing the whole analysis; the count is logged so it can be investigated.
+    """
+    counter = [0]
+    data = _replace_non_finite(data, counter)
+    if counter[0]:
+        logger.warning("Replaced %d non-finite numbers with null in %s", counter[0], path.name)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, separators=(",", ":"), allow_nan=False), encoding="utf-8")

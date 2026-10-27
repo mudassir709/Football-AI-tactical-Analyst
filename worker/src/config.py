@@ -145,7 +145,15 @@ JERSEY_SAMPLES_PER_TRACK: int = 10
 # head and the shorts, which are often a different colour to the shirt.
 TORSO_Y_RANGE: tuple[float, float] = (0.15, 0.50)
 TORSO_X_RANGE: tuple[float, float] = (0.25, 0.75)
-# HSV range treated as grass and removed from crops (OpenCV hue is 0-179).
+# Grass is removed from shirt crops by comparing pixels with the pitch colour
+# measured in a ring around each player (ring width = margin x box width).
+# A fixed "green" range would also remove green kits.
+GRASS_RING_MARGIN: float = 0.6
+# Lab distance (OpenCV 8-bit units) below which a pixel counts as grass;
+# brightness (L) is weighted down so mowing stripes still match.
+GRASS_LAB_DISTANCE: float = 22.0
+GRASS_L_WEIGHT: float = 0.5
+# Fallback when the local grass colour cannot be measured (OpenCV hue 0-179).
 GRASS_HSV_LOWER: tuple[int, int, int] = (35, 40, 40)
 GRASS_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
 MIN_JERSEY_PIXELS: int = 30

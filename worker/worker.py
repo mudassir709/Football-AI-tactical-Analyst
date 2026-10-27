@@ -43,6 +43,18 @@ def storage_path(relative: str) -> Path:
 
 
 async def process(job: Job, token: str) -> dict[str, Any]:
+    """Run one job, logging failures (BullMQ only stores them on the job)."""
+    try:
+        return await analyse(job)
+    except Exception as exc:
+        logger.exception("Job %s failed", job.data.get("matchId"))
+        if job.attemptsMade + 1 < job.opts.get("attempts", 1):
+            # Tell the dashboard a retry follows, instead of a stale stage.
+            await job.updateProgress({"percent": 0, "stage": f"Error, retrying: {exc}"})
+        raise
+
+
+async def analyse(job: Job) -> dict[str, Any]:
     """Analyse one uploaded match; the return value is sent back to the API."""
     match_id: str = job.data["matchId"]
     video = storage_path(job.data["videoPath"])

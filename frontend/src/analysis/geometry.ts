@@ -13,9 +13,13 @@ export function applyHomography(h: number[], x: number, y: number): Point | null
   return [(h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w];
 }
 
-/** Blend two homographies (normalised so h[8] = 1); good for small camera moves. */
+/**
+ * Blend two homographies; good for small camera moves. The worker stores them
+ * with a consistent scale and sign, so plain element-wise blending works
+ * (dividing by h[8] would explode when it is close to zero).
+ */
 export function lerpHomography(a: number[], b: number[], alpha: number): number[] {
-  return a.map((value, i) => value / a[8] + (b[i] / b[8] - value / a[8]) * alpha);
+  return a.map((value, i) => value + (b[i] - value) * alpha);
 }
 
 export const lerp = (a: number, b: number, alpha: number) => a + (b - a) * alpha;

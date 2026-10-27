@@ -92,12 +92,12 @@ def run_remote_analysis(
                 if errors >= MAX_CONSECUTIVE_POLL_ERRORS:
                     raise RemoteAnalysisError(f"Lost contact with the GPU service: {exc}") from exc
                 continue
+            if status["status"] == "failed":
+                raise RemoteAnalysisError(status.get("error") or "Remote analysis failed")
             scaled = UPLOAD_END + (ANALYSIS_END - UPLOAD_END) * status["percent"] / 100
             progress(scaled, f"{status['stage']} (on {device})")
             if status["status"] == "completed":
                 break
-            if status["status"] == "failed":
-                raise RemoteAnalysisError(status.get("error") or "Remote analysis failed")
 
         # 3. Download the outputs, then free the remote disk space.
         progress(ANALYSIS_END, "Downloading results")
