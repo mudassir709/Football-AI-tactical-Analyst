@@ -28,6 +28,21 @@ Laptop:  API → Redis queue → Worker ──HTTPS: upload video──▶ Cloud
 This is a common production pattern: a job orchestrator delegates model
 inference to a separate, independently scalable inference service.
 
+## Measured performance
+
+Same clips, same pipeline settings; the cloud GPU was a RunPod pod with an
+NVIDIA L4 (~$0.4/hour), the laptop an Intel i7-1255U (CPU inference).
+
+| Job | Laptop CPU | Cloud GPU (NVIDIA L4) | Speed-up |
+|---|---|---|---|
+| 3 s clip, Quick mode | 44-75 s | 5.1 s | ~10x |
+| 30 s clip, Standard mode | ~25 min | 40 s (53 s including upload/download) | ~37x |
+
+Both runs of the 30 s clip detected the same formations (3-4-3 and 5-3-2),
+so the results do not depend on where the analysis ran. The GPU's advantage
+grows with clip length, because fixed costs (upload, model start-up) matter
+less on longer videos.
+
 ## Step-by-step: running the GPU service on RunPod
 
 Costs: you pay per second only while the machine (a "pod") is running.
