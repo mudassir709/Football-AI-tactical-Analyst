@@ -1,22 +1,28 @@
 // LLM coaching report: turns the computed tactical statistics of a match into
-// a short written report for a coach, using the Claude API.
+// a short written report for a coach, using a model deployed on Azure OpenAI.
 //
 // Only numbers computed by the AI worker are sent (formations, compactness,
 // distances...), never the video. The prompt tells the model to stick to
 // these numbers, because the analysis contains no events such as passes,
 // shots or goals.
 import { readFile } from "node:fs/promises";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI, { AzureOpenAI } from "openai";
 import type { Match } from "./generated/prisma/client.ts";
 import { absolutePath } from "./storage.ts";
 
-const MODEL = "claude-opus-5-5";
+// Settings from the Azure portal (loaded from .env by config.ts):
+// the resource endpoint, its key, and the name given to the model deployment.
+const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+const apiKey = process.env.AZURE_OPENAI_API_KEY;
+const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2025-04-01-preview";
 
-/** True when an API key is configured; otherwise the feature is disabled. */
-export const reportsEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY);
+/** True when Azure OpenAI is configured; otherwise the feature is disabled. */
+export const reportsEnabled = () => Boolean(endpoint && apiKey && deployment);
 
-// Reads ANTHROPIC_API_KEY from the environment (loaded from .env by config.ts).
-const client = new Anthropic({ timeout: 120_000, maxRetries: 2 });
+const client = reportsEnabled()
+  ? new AzureOpenAI({ endpoint, apiKey, deployment, apiVersion, timeout: 120_000, maxRetries: 2 })
+  : null;
 
 /** A report could not be produced; `status` is the HTTP status to answer with. */
 export class ReportError extends Error {
@@ -99,50 +105,52 @@ async function buildMatchData(match: Match) {
 
 /** Generate a Markdown coaching report for a completed match. */
 export async function generateCoachingReport(match: Match): Promise<string> {
-  if (!reportsEnabled()) {
-    throw new ReportError("Coaching reports are not configured (set ANTHROPIC_API_KEY)", 503);
+  if (!client || !deployment) {
+    throw new ReportError(
+      "Coaching reports are not configured (set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY and AZURE_OPENAI_DEPLOYMENT)",
+      503,
+    );
   }
   const data = await buildMatchData(match);
 
-  let response: Anthropic.Beta.BetaMessage;
+  let response: OpenAI.Chat.ChatCompletion;
   try {
-    response = await client.beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      output_config: { effort: "medium" }, // a short report needs no deep reasoning
-      // If a safety classifier declines, the API retries on a suitable model.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: SYSTEM_PROMPT,
+    response = await client.chat.completions.create({
+      model: deployment, // on Azure the deployment name selects the model
+      // Generous limit: reasoning models (e.g. o-series, GPT-5) also spend
+      // tokens on hidden reasoning before writing the report.
+      max_completion_tokens: 8000,
       messages: [
-        {
-          role: "user",
-          content: `Match: "${match.title}"\n\nStatistics (JSON):\n${JSON.stringify(data, null, 2)}`,
-        },
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: `Match: "${match.title}"\n\nStatistics (JSON):\n${JSON.stringify(data, null, 2)}` },
       ],
     });
   } catch (error) {
     // Most specific first; the SDK already retried 429/5xx/network errors twice.
-    if (error instanceof Anthropic.AuthenticationError) {
-      throw new ReportError("The Anthropic API key is invalid", 502);
-    } else if (error instanceof Anthropic.RateLimitError) {
+    if (error instanceof OpenAI.AuthenticationError) {
+      throw new ReportError("The Azure OpenAI key is invalid", 502);
+    } else if (error instanceof OpenAI.NotFoundError) {
+      throw new ReportError("Azure OpenAI deployment not found (check AZURE_OPENAI_DEPLOYMENT and the endpoint)", 502);
+    } else if (error instanceof OpenAI.RateLimitError) {
       throw new ReportError("The report service is busy; try again in a minute", 429);
-    } else if (error instanceof Anthropic.APIConnectionError) {
+    } else if (error instanceof OpenAI.APIConnectionError) {
       throw new ReportError("Could not reach the report service", 502);
-    } else if (error instanceof Anthropic.APIError) {
-      throw new ReportError(`Report service error (${error.status})`, 502);
+    } else if (error instanceof OpenAI.APIError) {
+      throw new ReportError(`Report service error (${error.status}): ${error.message}`, 502);
     }
     throw error;
   }
 
-  if (response.stop_reason === "refusal") {
-    throw new ReportError("The report could not be generated for this match", 502);
+  const choice = response.choices[0];
+  if (choice?.finish_reason === "content_filter") {
+    throw new ReportError("The report was blocked by the Azure content filter", 502);
   }
-  const report = response.content
-    .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
-  if (!report) throw new ReportError("The report came back empty", 502);
+  const report = choice?.message.content?.trim();
+  if (!report) {
+    throw new ReportError(
+      choice?.finish_reason === "length" ? "The report was cut off (token limit reached)" : "The report came back empty",
+      502,
+    );
+  }
   return report;
 }

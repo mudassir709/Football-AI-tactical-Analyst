@@ -51,19 +51,22 @@ Run with `cd worker && python -m pytest`. They need no videos or models.
 Each bug found during development got a regression test, so it cannot
 silently come back.
 
-## AI coaching report (Claude API)
+## AI coaching report (Azure OpenAI)
 
 On a completed match, **Generate report** sends the computed statistics
 (formations over time, compactness, width/depth per third of the clip,
-top runners) to Claude Opus 5.5 and shows the returned Markdown report.
+top runners) to a GPT model deployed on Azure OpenAI and shows the returned
+Markdown report. Azure was chosen because it is covered by the Azure for
+Students credit from the GitHub Student Developer Pack.
 
 - Only numbers are sent, never video. The prompt forbids inventing events
   (passes, shots, goals) that the analysis does not measure, and asks the
   model to state the limits of a short broadcast clip.
-- The report is stored with the match and can be regenerated.
-- Refusal fallbacks are enabled (`fallbacks: "default"`): if a safety
-  classifier declines, the API retries on a suitable model automatically.
-- Errors (invalid key, rate limit, network) are shown as clear messages.
-- Disabled automatically when `ANTHROPIC_API_KEY` is not set.
+- The report is stored with the match and can be regenerated, so a demo
+  can show saved reports without new API calls.
+- Errors (invalid key, wrong deployment name, rate limit, network, content
+  filter) are shown as clear messages.
+- Configured with `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` and
+  `AZURE_OPENAI_DEPLOYMENT`; disabled automatically when they are not set.
 
 Code: `backend/src/report.ts`, `frontend/src/components/CoachingReport.tsx`.

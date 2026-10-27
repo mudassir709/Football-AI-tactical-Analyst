@@ -35,7 +35,7 @@ local processing when the GPU is unavailable.
 - Formation detection over time (template matching with the Hungarian algorithm)
 - Team compactness, width and depth; player distance and speed; heatmaps
 - Interactive video overlays and a synchronised 2D tactical board; click a player for their stats
-- AI coaching report (Claude API)
+- AI coaching report (Azure OpenAI)
 - Accounts with secure sessions; every user sees only their own matches
 - Docker images for every service, CI/CD with GitHub Actions, unit tests
 

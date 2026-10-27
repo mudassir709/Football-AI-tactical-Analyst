@@ -1,5 +1,5 @@
 // AI coaching report: a written interpretation of the match statistics,
-// generated on demand by a large language model (Claude) via the backend.
+// generated on demand by a large language model (Azure OpenAI) via the backend.
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import { api } from "../api";
@@ -45,7 +45,7 @@ export function CoachingReport({ matchId, completedAt }: { matchId: string; comp
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h2 className="font-semibold">AI coaching report</h2>
-          <p className="text-xs text-slate-500">Written by Claude from the computed statistics; no video is sent.</p>
+          <p className="text-xs text-slate-500">Written by an AI language model (Azure OpenAI) from the computed statistics; no video is sent.</p>
         </div>
         {enabled && !loading && (
           <Button variant={report ? "secondary" : "primary"} className="ml-auto" onClick={generate} disabled={generating}>
@@ -57,7 +57,7 @@ export function CoachingReport({ matchId, completedAt }: { matchId: string; comp
       {loading && <Spinner label="Loading report" />}
       {!loading && !enabled && (
         <p className="text-sm text-slate-400">
-          Coaching reports are not configured on this server (an Anthropic API key is needed).
+          Coaching reports are not configured on this server (Azure OpenAI settings are needed).
         </p>
       )}
       {error && <ErrorMessage>{error}</ErrorMessage>}

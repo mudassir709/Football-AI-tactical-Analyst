@@ -61,7 +61,11 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       FRONTEND_URL: http://localhost:8080
       COOKIE_SECURE: "false" # served over plain HTTP on localhost
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-} # optional: enables coaching reports
+      # Optional: Azure OpenAI settings enable the coaching reports.
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
     volumes:
       - ./storage:/storage
     depends_on:
