@@ -1,0 +1,6 @@
+# Runtime packages for the worker container and the CI tests.
+# PyTorch is installed separately (CPU build) in the Dockerfile / CI workflow.
+-r gpu/requirements-gpu.txt
+bullmq==3.4.3
+httpx>=0.27
+pytest>=8

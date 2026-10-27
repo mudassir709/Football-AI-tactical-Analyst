@@ -5,6 +5,8 @@
 //   GET    /api/matches/:id/video    stream the video (supports seeking)
 //   GET    /api/matches/:id/results  full analysis JSON (tracks, heatmaps, formations...)
 //   POST   /api/matches/:id/reanalyse  queue the analysis again (optionally another mode)
+//   GET    /api/matches/:id/report   stored LLM coaching report
+//   POST   /api/matches/:id/report   generate (or regenerate) the coaching report
 //   DELETE /api/matches/:id          delete a match and its files
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -16,6 +18,7 @@ import { config } from "../config.ts";
 import { prisma } from "../db.ts";
 import { toPublicMatch } from "../matchView.ts";
 import { ANALYSIS_MODES, enqueueAnalysis, removeQueuedJob, type AnalysisMode } from "../queue.ts";
+import { generateCoachingReport, ReportError, reportsEnabled } from "../report.ts";
 import { VIDEO_DIR, absolutePath, isVideoFile, removeFile } from "../storage.ts";
 
 export const matchesRouter = Router();
@@ -126,6 +129,33 @@ matchesRouter.get("/:id/results", async (req, res) => {
     return;
   }
   res.sendFile(absolutePath(match.resultPath));
+});
+
+// LLM coaching report: GET returns the stored one, POST (re)generates it.
+matchesRouter.get("/:id/report", async (req, res) => {
+  const match = await findOwnMatch(req, res);
+  if (!match) return;
+  res.json({ report: match.report, enabled: reportsEnabled() });
+});
+
+matchesRouter.post("/:id/report", async (req, res) => {
+  const match = await findOwnMatch(req, res);
+  if (!match) return;
+  if (match.status !== "COMPLETED") {
+    res.status(409).json({ error: "Analysis has not finished yet" });
+    return;
+  }
+  try {
+    const report = await generateCoachingReport(match);
+    await prisma.match.update({ where: { id: match.id }, data: { report } });
+    res.json({ report, enabled: true });
+  } catch (error) {
+    if (error instanceof ReportError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
 });
 
 // Run the analysis again on the stored video, e.g. after a pipeline upgrade

@@ -1,0 +1,98 @@
+# Continuous integration and delivery.
+#
+# On every push and pull request: type-check, lint and test each service.
+# If all checks pass, build the three Docker images; on pushes to main they are
+# also published to GitHub Container Registry (ghcr.io), ready to deploy.
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write # publish images to ghcr.io
+
+jobs:
+  backend:
+    name: Backend - type check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci # also generates the Prisma client (postinstall)
+      - run: npm run typecheck
+
+  frontend:
+    name: Frontend - lint, type check, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build # TypeScript check + production bundle
+
+  worker:
+    name: Worker - unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            worker/requirements-docker.txt
+            worker/gpu/requirements-gpu.txt
+      - name: Install dependencies (CPU PyTorch)
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-docker.txt
+      - run: python -m pytest -q
+
+  images:
+    name: Docker image - ${{ matrix.service }}
+    needs: [backend, frontend, worker]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [backend, frontend, worker]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (and publish on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/tactical-eye-${{ matrix.service }}:latest
+            ghcr.io/${{ github.repository_owner }}/tactical-eye-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { AnalysisResults } from "../analysis/types";
 import { api } from "../api";
+import { CoachingReport } from "../components/CoachingReport";
 import { VideoAnalysis } from "../components/VideoAnalysis";
 import { Button, Card, ErrorMessage, ProgressBar, Spinner, Stat, StatusBadge } from "../components/ui";
 import { formatDate, formatDuration, formatPercent } from "../format";
@@ -98,6 +99,7 @@ export function MatchPage() {
             <Spinner label="Loading analysis" />
           )}
           {match.summary && <SummaryPanel match={match} />}
+          <CoachingReport matchId={match.id} completedAt={match.completedAt} />
         </>
       )}
     </div>

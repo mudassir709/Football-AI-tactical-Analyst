@@ -21,6 +21,9 @@ const EnvSchema = z.object({
   FRONTEND_URL: z.string().default("http://localhost:5173"),
   MAX_UPLOAD_MB: z.coerce.number().positive().default(500),
   NODE_ENV: z.string().default("development"),
+  // Send the login cookie over HTTPS only. Defaults to on in production; set
+  // "false" when serving production builds over plain HTTP (e.g. a local demo).
+  COOKIE_SECURE: z.enum(["true", "false"]).optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -41,4 +44,5 @@ export const config = {
   frontendUrl: env.FRONTEND_URL,
   maxUploadBytes: env.MAX_UPLOAD_MB * 1024 * 1024,
   isProduction: env.NODE_ENV === "production",
+  cookieSecure: env.COOKIE_SECURE ? env.COOKIE_SECURE === "true" : env.NODE_ENV === "production",
 };

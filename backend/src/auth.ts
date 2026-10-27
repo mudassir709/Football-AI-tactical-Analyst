@@ -24,7 +24,7 @@ declare global {
 export const authCookieOptions: CookieOptions = {
   httpOnly: true,
   sameSite: "lax",
-  secure: config.isProduction, // HTTPS-only in production
+  secure: config.cookieSecure, // HTTPS-only unless COOKIE_SECURE=false
   maxAge: TOKEN_LIFETIME_SECONDS * 1000,
   path: "/",
 };

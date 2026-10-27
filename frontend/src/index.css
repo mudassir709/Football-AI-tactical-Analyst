@@ -9,3 +9,22 @@
     @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
   }
 }
+
+/* Typography for the Markdown coaching report. */
+.report h1,
+.report h2 {
+  @apply mt-5 mb-2 text-base font-semibold text-white first:mt-0;
+}
+.report h3 {
+  @apply mt-4 mb-1 font-semibold text-white;
+}
+.report p {
+  @apply my-2;
+}
+.report ul,
+.report ol {
+  @apply my-2 list-disc space-y-1 pl-5;
+}
+.report strong {
+  @apply font-semibold text-white;
+}

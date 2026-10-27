@@ -1,11 +1,17 @@
 # Football AI Tactical Analyst - service definitions.
 #
-# Start the infrastructure:   docker compose up -d
-# Check it is healthy:        docker compose ps
-# Stop it (data is kept):     docker compose down
+# Development (database + queue only; run API, worker and frontend yourself):
+#   docker compose up -d
+#
+# Whole platform in containers (open http://localhost:8080):
+#   docker compose --profile app up -d --build
+#
+# Check status:            docker compose --profile app ps
+# Stop (data is kept):     docker compose --profile app down
 #
 # Values like ${POSTGRES_PASSWORD} are read from the .env file next to this one
-# (copy .env.example to .env first).
+# (copy .env.example to .env first). The worker needs the model weights in
+# worker/models/ (see README).
 
 services:
   # PostgreSQL: stores users, matches, jobs and analysis summaries.
@@ -41,6 +47,60 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # --- Application services (profile "app") ---------------------------------
+
+  # Node.js API: authentication, uploads, job queue, WebSockets.
+  backend:
+    profiles: ["app"]
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: http://localhost:8080
+      COOKIE_SECURE: "false" # served over plain HTTP on localhost
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-} # optional: enables coaching reports
+    volumes:
+      - ./storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # Python AI worker: takes jobs from the queue and runs the analysis.
+  worker:
+    profiles: ["app"]
+    build: ./worker
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379
+      GPU_SERVER_URL: ${GPU_SERVER_URL:-}
+      GPU_SERVER_TOKEN: ${GPU_SERVER_TOKEN:-}
+    volumes:
+      - ./storage:/storage
+      - ./worker/models:/app/models:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # React dashboard served by nginx, which also proxies /api and WebSockets.
+  frontend:
+    profiles: ["app"]
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres-data:

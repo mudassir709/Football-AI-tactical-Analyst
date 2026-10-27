@@ -39,6 +39,8 @@ export const api = {
   listMatches: () => request<{ matches: Match[] }>("/matches"),
   getMatch: (id: string) => request<{ match: Match }>(`/matches/${id}`),
   deleteMatch: (id: string) => request<void>(`/matches/${id}`, { method: "DELETE" }),
+  getReport: (id: string) => request<{ report: string | null; enabled: boolean }>(`/matches/${id}/report`),
+  generateReport: (id: string) => post<{ report: string; enabled: boolean }>(`/matches/${id}/report`),
   reanalyse: (id: string, mode?: AnalysisMode) =>
     post<{ match: Match }>(`/matches/${id}/reanalyse`, mode ? { mode } : {}),
   getResults: <T>(id: string) => request<T>(`/matches/${id}/results`),
