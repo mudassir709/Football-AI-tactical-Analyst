@@ -1,0 +1,12 @@
+{
+  "name": "tactical-eye-thesis",
+  "private": true,
+  "description": "Builds the thesis documentation (Word) from build.js",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": {
+    "docx": "^9.14.0",
+    "mermaid": "^11.17.2"
+  }
+}

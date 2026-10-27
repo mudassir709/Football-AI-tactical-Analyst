@@ -1,0 +1,260 @@
+%% ==== architecture
+flowchart TB
+  subgraph Client["Client (web browser)"]
+    UI["React dashboard<br/>upload · overlays · 2D board · report"]
+  end
+  subgraph Server["Application server"]
+    NGINX["nginx<br/>static files + reverse proxy"]
+    API["Node.js API (Express 5)<br/>auth · uploads · jobs · Socket.IO"]
+    DB[("PostgreSQL 17<br/>users · matches")]
+    Q[("Redis 7<br/>BullMQ job queue")]
+    FS[["Shared file storage<br/>videos/ · results/"]]
+    W["Python AI worker<br/>YOLOv8 · ByteTrack · homography<br/>K-Means · formations · metrics"]
+  end
+  GPU["Cloud GPU service<br/>(optional, RunPod)"]
+  LLM["Azure OpenAI<br/>(coaching report)"]
+  UI -- "HTTP: REST + WebSocket" --> NGINX --> API
+  API --> DB
+  API -- "add job / job events" --> Q
+  Q -- "take job / progress" --> W
+  API --> FS
+  W --> FS
+  W -. "offload analysis" .-> GPU
+  API -. "statistics only" .-> LLM
+
+%% ==== deployment
+flowchart TB
+  USER(["User's browser"]) -->|"http://localhost:8080"| FE
+  subgraph Host["Docker host: docker compose --profile app"]
+    FE["frontend<br/>nginx:1.27-alpine<br/>port 8080 → 80"]
+    BE["backend<br/>node:24-alpine<br/>port 4000"]
+    WK["worker<br/>python:3.12-slim<br/>CPU PyTorch"]
+    PG[("postgres:17-alpine<br/>port 5432")]
+    RD[("redis:7.4-alpine<br/>port 6379")]
+    VOL[["./storage volume"]]
+    MOD[["./worker/models (read-only)"]]
+  end
+  FE -->|"/api, /socket.io"| BE
+  BE --> PG
+  BE --> RD
+  WK --> RD
+  BE --- VOL
+  WK --- VOL
+  WK --- MOD
+  WK -.->|"HTTPS + token"| GPU["GPU analysis service<br/>FastAPI on RunPod"]
+  BE -.->|HTTPS| AZ["Azure OpenAI"]
+  subgraph CI["GitHub"]
+    GA["GitHub Actions CI/CD"] --> GHCR[("ghcr.io images")]
+  end
+  GHCR -. "docker pull" .-> Host
+
+%% ==== sequence_upload
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant B as Browser (React)
+  participant A as API (Express)
+  participant D as PostgreSQL
+  participant Q as Redis queue
+  participant W as AI worker
+  U->>B: choose video, title, mode
+  B->>A: POST /api/matches (multipart)
+  A->>A: validate type, size, magic number
+  A->>D: INSERT match (QUEUED)
+  A->>Q: add job {matchId, videoPath, mode}
+  A-->>B: 201 Created {match}
+  B->>A: WebSocket connect (login cookie)
+  Q->>W: job becomes active
+  Q-->>A: event "active"
+  A->>D: status = PROCESSING
+  A-->>B: match:updated
+  loop every stage of the pipeline
+    W->>Q: updateProgress {percent, stage}
+    Q-->>A: event "progress"
+    A->>D: progress, stage
+    A-->>B: match:updated (progress bar moves)
+  end
+  W->>W: write results JSON + H.264 copy
+  W->>Q: return {resultPath, playbackPath, summary}
+  Q-->>A: event "completed"
+  A->>D: status = COMPLETED, summary
+  A-->>B: match:updated
+  B->>A: GET /results and /video (Range requests)
+  B->>U: video with synchronised overlays
+
+%% ==== er
+erDiagram
+  User ||--o{ Match : "uploads"
+  User {
+    String id PK "cuid"
+    String email UK
+    String name
+    String passwordHash "bcrypt, cost 12"
+    DateTime createdAt
+  }
+  Match {
+    String id PK "cuid, also the job ID"
+    String userId FK
+    String title
+    MatchStatus status "QUEUED, PROCESSING, COMPLETED, FAILED"
+    String analysisMode "standard or quick"
+    Int progress "0 to 100"
+    String stage "nullable"
+    String errorMessage "nullable"
+    String originalFilename
+    Int fileSizeBytes
+    String videoPath "relative to storage"
+    String playbackPath "nullable, H.264 copy"
+    String resultPath "nullable, results JSON"
+    Json summary "nullable, headline numbers"
+    String report "nullable, Markdown"
+    DateTime createdAt
+    DateTime updatedAt
+    DateTime completedAt "nullable"
+  }
+
+%% ==== status
+stateDiagram-v2
+  direction LR
+  [*] --> QUEUED: upload accepted
+  QUEUED --> PROCESSING: worker takes the job
+  PROCESSING --> COMPLETED: results written
+  PROCESSING --> QUEUED: error, retry left
+  PROCESSING --> FAILED: error on last attempt
+  COMPLETED --> QUEUED: Re-analyse
+  FAILED --> QUEUED: Re-analyse
+  COMPLETED --> [*]: Delete
+  FAILED --> [*]: Delete
+  QUEUED --> [*]: Delete
+
+%% ==== pipeline
+flowchart TB
+  V[/"Uploaded video"/] --> T["0 · H.264 playback copy<br/>PyAV / libx264 · 0–5 %"]
+  T --> DT["1 · Detection + tracking · 5–60 %<br/>YOLOv8x: ball, goalkeeper, player, referee<br/>ByteTrack IDs · best ball per frame"]
+  DT --> KP["2 · Pitch keypoints · 60–88 %<br/>YOLOv8-pose, 32 landmarks"]
+  KP --> H["Homography per frame<br/>RANSAC · collinearity check · reuse ≤ 10 frames"]
+  H --> P["Project feet → pitch metres (105 × 68 m)"]
+  P --> TA["3 · Team assignment · 88–93 %<br/>torso colour vs local grass (Lab)<br/>K-Means k = 2 · goalkeepers by proximity"]
+  TA --> S["4 · Tactics · 93–98 %<br/>smoothing (1 s) · ball gap interpolation"]
+  S --> F["Formations<br/>5 s windows · Hungarian matching · hysteresis"]
+  S --> M["Metrics<br/>convex-hull area · width · depth<br/>distance · speed · heatmaps"]
+  F --> R[/"5 · results JSON, atomic write · 98–100 %"/]
+  M --> R
+  R --> SUM[/"summary → database"/]
+
+%% ==== navigation
+flowchart LR
+  L["/login<br/>Log in"] <-->|link| RG["/register<br/>Create account"]
+  L -->|success| M
+  RG -->|success| M
+  subgraph APP["Protected area: header with Matches · Upload · Log out"]
+    M["/<br/>Matches list<br/>live progress cards"]
+    UP["/upload<br/>Upload a match"]
+    MP["/matches/:id<br/>Analysis page"]
+  end
+  M -->|"Upload a match"| UP
+  UP -->|"upload finished"| MP
+  M -->|"Open analysis"| MP
+  MP -->|"← All matches"| M
+  APP -->|"Log out / not logged in"| L
+  X["any other URL"] --> M
+
+%% ==== cicd
+flowchart LR
+  P["git push / pull request"] --> B & F & W
+  B["backend job<br/>npm ci · prisma generate · tsc"]
+  F["frontend job<br/>npm ci · oxlint · tsc + vite build"]
+  W["worker job<br/>pip install, CPU torch · pytest"]
+  B & F & W --> I["images job, matrix of 3<br/>docker build backend · frontend · worker"]
+  I -->|"push to main only"| G[("ghcr.io/owner/tactical-eye-*")]
+
+%% ==== gpu_sequence
+sequenceDiagram
+  autonumber
+  participant W as Worker
+  participant G as GPU service (FastAPI)
+  W->>G: GET /health (Bearer token)
+  alt unreachable or server error
+    W->>W: RemoteUnavailable, run pipeline locally
+  else available
+    W->>G: POST /jobs (video, mode)
+    G-->>W: {id}
+    loop every few seconds
+      W->>G: GET /jobs/{id}
+      G-->>W: {status, percent, stage}
+      W->>W: forward progress to the queue
+    end
+    W->>G: GET /jobs/{id}/results and /playback
+    W->>G: DELETE /jobs/{id}
+  end
+
+%% ==== classes_worker
+classDiagram
+  direction LR
+  class FootballDetector {
+    +imgsz: int
+    +detect_batch(frames) list
+    -_postprocess(result) Detections
+  }
+  class FootballTracker {
+    +update(detections, timestamp) tuple
+    +reset()
+    -_select_ball(balls) Detections
+  }
+  class PitchKeypointDetector {
+    +detect_batch(frames) list
+  }
+  class HomographyEstimator {
+    +max_reuse: int
+    +update(xy, confidence) tuple
+    +reset()
+  }
+  class Homography {
+    +matrix: ndarray 3x3
+    +n_inliers: int
+    +reprojection_error: float
+    +fit(image_points, pitch_points)$ Homography
+    +image_to_pitch(points) ndarray
+  }
+  class PitchDimensions {
+    +length: float = 105
+    +width: float = 68
+    +keypoints: ndarray 32x2
+    +line_segments() list
+  }
+  class TeamAssignment {
+    +track_teams: dict
+    +team_colours_bgr: ndarray
+    +agreement: Series
+    +team_colour_hex(team) str
+  }
+  class FormationResult {
+    +windows: DataFrame
+    +positions: DataFrame
+    +changes: DataFrame
+  }
+  HomographyEstimator --> Homography : creates
+  HomographyEstimator --> PitchDimensions : uses
+  FootballTracker ..> FootballDetector : consumes detections
+
+%% ==== frontend_components
+flowchart TB
+  MAIN["main.tsx<br/>BrowserRouter · AuthProvider"] --> APP["App.tsx (routes)"]
+  APP --> AUTH["AuthPage<br/>login or register"]
+  APP --> LAY["Layout<br/>header · login guard"]
+  LAY --> MS["MatchesPage"] --> MC["MatchCard × n"]
+  LAY --> UPL["UploadPage"]
+  LAY --> MP["MatchPage"]
+  MP --> VA["VideoAnalysis"]
+  MP --> SP["SummaryPanel → TeamCard × 2"]
+  MP --> CR["CoachingReport"]
+  VA --> LEG["Legend"]
+  VA --> PP["PlayerPanel"]
+  VA -.-> TL["analysis/timeline.ts: Timeline"]
+  VA -.-> DR["analysis/draw.ts: drawVideoOverlay, drawBoard"]
+  DR -.-> GE["analysis/geometry.ts"]
+  MS -. "useMatchUpdates" .-> WS(("Socket.IO"))
+  MP -. "useMatchUpdates" .-> WS
+  AUTH -. "api.ts" .-> REST(("REST /api"))
+  UPL -. "api.ts" .-> REST
+  MP -. "api.ts" .-> REST
