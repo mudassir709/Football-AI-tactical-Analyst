@@ -1,0 +1,33 @@
+{
+  "frames": 20,
+  "people": {
+    "annotated": 466,
+    "detected": 463,
+    "matched": 462,
+    "recall": 0.991,
+    "precision": 0.998,
+    "role_accuracy": 1.0
+  },
+  "teams": {
+    "players": 404,
+    "accuracy": 0.995
+  },
+  "ball": {
+    "visible": 20,
+    "found": 18,
+    "recall": 0.9,
+    "reported_but_not_visible": 0
+  },
+  "landmark_error_m": {
+    "n": 94,
+    "mean": 1.23,
+    "median": 0.84,
+    "p90": 3.03
+  },
+  "player_position_error_m": {
+    "n": 462,
+    "mean": 0.64,
+    "median": 0.61,
+    "p90": 0.95
+  }
+}
