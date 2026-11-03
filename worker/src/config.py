@@ -190,3 +190,8 @@ HEATMAP_BINS: tuple[int, int] = (21, 14)
 # Steps implying a faster speed are tracking glitches (ID jumps), not running;
 # elite sprinters peak around 10-11 m/s.
 MAX_PLAYER_SPEED: float = 12.0
+# Top speed is measured as the average speed over this many seconds. Speeds
+# between two single frames are too noisy: a small jump in the measured
+# position (e.g. when the camera model switches) looked like a 39.6 km/h
+# sprint in clip 3. Over one second, those jumps average out.
+TOP_SPEED_WINDOW_SECONDS: float = 1.0

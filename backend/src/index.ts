@@ -10,7 +10,7 @@ import { AUTH_COOKIE, verifyToken } from "./auth.ts";
 import { config } from "./config.ts";
 import { prisma } from "./db.ts";
 import { toPublicMatch } from "./matchView.ts";
-import { analysisQueue, startQueueEventListener } from "./queue.ts";
+import { closeQueue, startQueueEventListener } from "./queue.ts";
 
 const app = createApp();
 const server = createServer(app);
@@ -53,7 +53,7 @@ async function shutdown(signal: string) {
   console.log(`${signal} received, shutting down`);
   io.close();
   server.close();
-  await Promise.allSettled([queueEvents.close(), analysisQueue.close(), prisma.$disconnect()]);
+  await Promise.allSettled([queueEvents.close(), closeQueue(), prisma.$disconnect()]);
   process.exit(0);
 }
 process.on("SIGINT", () => void shutdown("SIGINT"));

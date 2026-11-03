@@ -60,6 +60,7 @@ def player_stats(
 
     Steps across gaps (the track was lost for a while) or faster than
     ``max_speed`` m/s (an ID jump, not real running) are not counted.
+    The top speed is the best one-second average, not the fastest single step.
     """
     people = tracks[(tracks["role"] != "ball") & tracks["pitch_x"].notna()]
     people = people.sort_values(["tracker_id", "frame_idx"])
@@ -73,12 +74,20 @@ def player_stats(
     valid = dt.notna() & (dt <= 3 * frame_interval) & (speed <= max_speed)
     people = people.assign(step=step.where(valid, 0.0), speed=speed.where(valid))
 
+    # For the top speed, first average each player's speed over about one
+    # second, then take the highest of those averages. A track needs a full
+    # second of valid steps to get a top speed; shorter ones show "—".
+    window = max(1, round(config.TOP_SPEED_WINDOW_SECONDS / frame_interval))
+    people["speed_1s"] = people.groupby("tracker_id")["speed"].transform(
+        lambda s: s.rolling(window, min_periods=window).mean()
+    )
+
     stats = people.groupby("tracker_id").agg(
         team=("team", "first"),
         role=("role", "first"),
         frames=("frame_idx", "nunique"),
         distance_m=("step", "sum"),
-        max_speed=("speed", "max"),
+        max_speed=("speed_1s", "max"),
         mean_x=("pitch_x", "mean"),
         mean_y=("pitch_y", "mean"),
     )

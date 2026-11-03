@@ -1,8 +1,11 @@
 # Continuous integration and delivery.
 #
-# On every push and pull request: type-check, lint and test each service.
-# If all checks pass, build the three Docker images; on pushes to main they are
-# also published to GitHub Container Registry (ghcr.io), ready to deploy.
+# On every push and pull request:
+#   1. type-check, lint and unit-test each service on its own
+#   2. start the whole platform with Docker and run the system tests against it
+#   3. build the three Docker images; on pushes to main they are also published
+#      to GitHub Container Registry (ghcr.io), ready to deploy.
+# Each step only runs if the steps before it passed.
 name: CI/CD
 
 on:
@@ -16,11 +19,28 @@ permissions:
 
 jobs:
   backend:
-    name: Backend - type check
+    name: Backend - type check, tests
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    # The API tests use a real PostgreSQL and Redis, started next to the job.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tactical
+          POSTGRES_PASSWORD: tactical
+          POSTGRES_DB: tactical_analyst
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U tactical" --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://tactical:tactical@localhost:5432/tactical_analyst
+      REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,9 +50,10 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci # also generates the Prisma client (postinstall)
       - run: npm run typecheck
+      - run: npm test
 
   frontend:
-    name: Frontend - lint, type check, build
+    name: Frontend - lint, tests, build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -46,6 +67,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test # unit tests of the overlay maths (timeline, geometry)
       - run: npm run build # TypeScript check + production bundle
 
   worker:
@@ -69,9 +91,60 @@ jobs:
           pip install -r requirements-docker.txt
       - run: python -m pytest -q
 
+  system:
+    name: System tests - whole platform in Docker
+    needs: [backend, frontend, worker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The AI models (270 MB) are not in the repository. Download them once
+      # and keep them in the CI cache for later runs.
+      - name: Cache AI models
+        id: models
+        uses: actions/cache@v4
+        with:
+          path: worker/models
+          key: roboflow-football-models-v1
+      - name: Download AI models
+        if: steps.models.outputs.cache-hit != 'true'
+        run: |
+          pip install gdown
+          mkdir -p worker/models
+          gdown -q -O worker/models/football-player-detection.pt "https://drive.google.com/uc?id=17PXFNlx-jI7VjVo_vQnB1sONjRyvoB-q"
+          gdown -q -O worker/models/football-pitch-detection.pt "https://drive.google.com/uc?id=1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf"
+
+      # Throw-away settings for this test run only (not real secrets).
+      - name: Create test settings
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_USER=tactical
+          POSTGRES_PASSWORD=ci-test-password
+          POSTGRES_DB=tactical_analyst
+          JWT_SECRET=ci-test-secret-that-is-at-least-32-characters
+          EOF
+
+      - name: Start the whole platform
+        run: docker compose --profile app up -d --build --wait
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the system tests
+        run: |
+          pip install -r tests/system/requirements.txt
+          python -m pytest tests/system -v
+        env:
+          TACTICAL_EYE_URL: http://localhost:8080
+          SYSTEM_TEST_CLIP: tests/system/data/short_clip.mp4
+
+      - name: Show the service logs if something failed
+        if: failure()
+        run: docker compose --profile app logs --tail 200
+
   images:
     name: Docker image - ${{ matrix.service }}
-    needs: [backend, frontend, worker]
+    needs: [system]
     runs-on: ubuntu-latest
     strategy:
       matrix:

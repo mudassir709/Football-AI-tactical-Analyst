@@ -1,0 +1,187 @@
+<!doctype html>
+<!--
+  Annotation tool for the accuracy check. Open this file in Edge or Chrome
+  (double-click it). It shows the frames saved by extract_frames.py; you click
+  every player's feet, the ball and some pitch landmarks. "Save" downloads
+  annotations.json, which evaluate.py compares with the AI's results.
+  Your clicks are also kept in the browser, so you can close it and continue later.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tactical Eye – annotation</title>
+<style>
+  body { margin: 0; font: 14px/1.4 "Segoe UI", Arial, sans-serif; background: #111827; color: #e5e7eb; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: #1f2937; position: sticky; top: 0; z-index: 2; }
+  button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #4b5563; background: #374151; color: inherit; cursor: pointer; }
+  button.active { outline: 2px solid #fbbf24; }
+  main { display: grid; grid-template-columns: 1fr 330px; gap: 12px; padding: 12px; }
+  #stage { position: relative; }
+  #stage img { width: 100%; display: block; cursor: crosshair; user-select: none; }
+  #stage svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  aside { font-size: 13px; }
+  aside img { width: 100%; background: #fff; }
+  .spacer { flex: 1; }
+  kbd { background: #374151; padding: 0 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="prev">◀ Prev</button>
+  <strong id="title"></strong>
+  <button id="next">Next ▶</button>
+  <span>Label:</span>
+  <!-- One button per kind of thing to click; the keyboard key is in brackets. -->
+  <button data-label="team1">Team 1 [1]</button>
+  <button data-label="team2">Team 2 [2]</button>
+  <button data-label="goalkeeper">Goalkeeper [G]</button>
+  <button data-label="referee">Referee [R]</button>
+  <button data-label="ball">Ball [B]</button>
+  <button data-label="landmark">Landmark [L]</button>
+  <span class="spacer"></span>
+  <span id="count"></span>
+  <button id="undo">Undo [Z]</button>
+  <label><button id="loadButton">Load…</button><input id="load" type="file" accept=".json" hidden></label>
+  <button id="save">Save annotations.json</button>
+</header>
+<main>
+  <div id="stage">
+    <img id="frame" alt="frame to annotate">
+    <svg id="marks"></svg>
+  </div>
+  <aside>
+    <h3>How to annotate</h3>
+    <ol>
+      <li>Click the <b>feet</b> (the point on the grass between both feet) of <b>every</b> person whose feet you can see, with the right label. Do not skip anyone.</li>
+      <li>"Team 1" and "Team 2" can be either team, but keep them the same for all frames of a clip.</li>
+      <li>Click the centre of the <b>ball</b> if you can see it.</li>
+      <li>For <b>landmarks</b>, click a pitch point that is clearly visible (corner of a box, end of the halfway line…) and type its number from the picture below. 3–6 per frame is enough.</li>
+      <li>Right-click a mark to delete it; <kbd>Z</kbd> removes the last one. <kbd>←</kbd>/<kbd>→</kbd> change the frame.</li>
+      <li>Press <b>Save</b> when you are done, and put the downloaded <code>annotations.json</code> in <code>tests/accuracy/</code>.</li>
+    </ol>
+    <img src="../../docs/thesis/figures/pitch_keypoints.png" alt="pitch landmark numbers">
+  </aside>
+</main>
+<script src="frames/frames.js"></script>
+<script>
+  // Colours of the marks, one per label.
+  const COLOURS = { team1: "#f8fafc", team2: "#ef4444", goalkeeper: "#22c55e", referee: "#facc15", ball: "#f97316", landmark: "#38bdf8" };
+  const STORAGE_KEY = "tactical-eye-annotations";
+
+  // annotations["sample_0114.jpg"] = [{label, x, y, landmark?}, ...] in full-size image pixels.
+  let annotations = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+  let index = 0;
+  let label = "team1";
+
+  const img = document.getElementById("frame");
+  const svg = document.getElementById("marks");
+  const frames = window.FRAMES;
+
+  const current = () => frames[index];
+  const marks = () => (annotations[current().file] ??= []);
+  const remember = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(annotations));
+
+  // Show frame number i and its marks.
+  function show(i) {
+    index = Math.max(0, Math.min(frames.length - 1, i));
+    img.src = "frames/" + current().file;
+    document.getElementById("title").textContent = `${index + 1} / ${frames.length}: ${current().file}`;
+    draw();
+  }
+
+  // Draw all marks of this frame as circles on top of the image.
+  function draw() {
+    const { width, height } = current();
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.innerHTML = marks().map((m) => {
+      const text = m.label === "landmark" ? m.landmark : { team1: "1", team2: "2", goalkeeper: "G", referee: "R", ball: "B" }[m.label];
+      return `<circle cx="${m.x}" cy="${m.y}" r="7" fill="none" stroke="${COLOURS[m.label]}" stroke-width="3"/>` +
+        `<text x="${m.x + 9}" y="${m.y - 9}" fill="${COLOURS[m.label]}" font-size="22" font-weight="bold">${text}</text>`;
+    }).join("");
+    const people = marks().filter((m) => m.label !== "ball" && m.label !== "landmark").length;
+    const landmarks = marks().filter((m) => m.label === "landmark").length;
+    document.getElementById("count").textContent = `${people} people, ${landmarks} landmarks on this frame`;
+  }
+
+  // Turn a mouse position into full-size image pixels.
+  function toImage(event) {
+    const box = img.getBoundingClientRect();
+    return {
+      x: Math.round(((event.clientX - box.left) / box.width) * current().width),
+      y: Math.round(((event.clientY - box.top) / box.height) * current().height),
+    };
+  }
+
+  // Left click: add a mark with the current label (landmarks also need their number).
+  img.addEventListener("click", (event) => {
+    const mark = { label, ...toImage(event) };
+    if (label === "landmark") {
+      const number = Number(prompt("Landmark number (1-32)?"));
+      if (!(number >= 1 && number <= 32)) return;
+      mark.landmark = number;
+    }
+    marks().push(mark);
+    remember();
+    draw();
+  });
+
+  // Right click: delete the mark closest to the mouse (if it is near).
+  img.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    const { x, y } = toImage(event);
+    const list = marks();
+    let best = -1, bestDistance = 25;
+    list.forEach((m, i) => {
+      const distance = Math.hypot(m.x - x, m.y - y);
+      if (distance < bestDistance) { best = i; bestDistance = distance; }
+    });
+    if (best >= 0) { list.splice(best, 1); remember(); draw(); }
+  });
+
+  function choose(newLabel) {
+    label = newLabel;
+    document.querySelectorAll("[data-label]").forEach((b) => b.classList.toggle("active", b.dataset.label === label));
+  }
+  document.querySelectorAll("[data-label]").forEach((b) => b.addEventListener("click", () => choose(b.dataset.label)));
+
+  function undo() { marks().pop(); remember(); draw(); }
+
+  // Keyboard shortcuts.
+  document.addEventListener("keydown", (event) => {
+    const keys = { "1": "team1", "2": "team2", g: "goalkeeper", r: "referee", b: "ball", l: "landmark" };
+    const key = event.key.toLowerCase();
+    if (keys[key]) choose(keys[key]);
+    else if (key === "z") undo();
+    else if (event.key === "ArrowRight") show(index + 1);
+    else if (event.key === "ArrowLeft") show(index - 1);
+  });
+
+  document.getElementById("prev").onclick = () => show(index - 1);
+  document.getElementById("next").onclick = () => show(index + 1);
+  document.getElementById("undo").onclick = undo;
+
+  // Save: download everything as annotations.json.
+  document.getElementById("save").onclick = () => {
+    const blob = new Blob([JSON.stringify({ frames, annotations }, null, 1)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "annotations.json";
+    link.click();
+  };
+
+  // Load: continue from an annotations.json saved earlier.
+  document.getElementById("loadButton").onclick = () => document.getElementById("load").click();
+  document.getElementById("load").onchange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    annotations = JSON.parse(await file.text()).annotations;
+    remember();
+    draw();
+  };
+
+  choose("team1");
+  img.onload = draw;
+  show(0);
+</script>
+</body>
+</html>

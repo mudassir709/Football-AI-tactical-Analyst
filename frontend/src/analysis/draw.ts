@@ -18,9 +18,28 @@ export const TRAIL_SECONDS = 4;
 export const REFEREE_COLOUR = "#FACC15";
 const UNASSIGNED_COLOUR = "#94A3B8";
 
+// Colours of the "tactics board" theme (the same as in index.css).
+const CHALK = "#e9ece4";
+const AMBER = "#f2b33d";
+const BOARD_GRASS = "#183024";
+const BOARD_STRIPE = "#1c3829";
+const DARK = "#13261c";
+
+// On the 2D board the teams are drawn like on a coach's whiteboard:
+// Team A as chalk circles (○), Team B as amber crosses (×).
+export const BOARD_SYMBOL: Record<number, string> = { 0: "○", 1: "×" };
+
+// Colour of a person on the video: their real kit colour, so the markers
+// match the shirts you see; referees are always yellow.
 export function personColour(results: AnalysisResults, team: number, role: number): string {
   if (role === ROLE.referee) return REFEREE_COLOUR;
   return results.teams.find((t) => t.id === team)?.colour ?? UNASSIGNED_COLOUR;
+}
+
+// Colour of a person on the 2D board: chalk for Team A, amber for Team B.
+function boardColour(team: number, role: number): string {
+  if (role === ROLE.referee) return REFEREE_COLOUR;
+  return team === 0 ? CHALK : team === 1 ? AMBER : UNASSIGNED_COLOUR;
 }
 
 /** Heat colour from cool/transparent (0) to hot red (1). */
@@ -139,7 +158,7 @@ export function drawVideoOverlay(
 
   // 4. Player markers: ellipse at the feet plus ID label, like TV graphics.
   if (layers.players) {
-    ctx.font = `600 ${Math.max(10, 13 * scale * 1.4)}px system-ui, sans-serif`;
+    ctx.font = `600 ${Math.max(10, 13 * scale * 1.4)}px "IBM Plex Sans", system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     for (const person of state.people) {
@@ -163,7 +182,7 @@ export function drawVideoOverlay(
       ctx.beginPath();
       ctx.roundRect(fx - textW / 2, ly - textH / 2, textW, textH, 4);
       ctx.fill();
-      ctx.fillStyle = "#0f172a";
+      ctx.fillStyle = DARK;
       ctx.fillText(label, fx, ly + 1);
     }
   }
@@ -185,7 +204,7 @@ export function drawVideoOverlay(
       ctx.closePath();
       ctx.fillStyle = "#ffffff";
       ctx.fill();
-      ctx.strokeStyle = "#0f172a";
+      ctx.strokeStyle = DARK;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
@@ -237,21 +256,24 @@ export function boardTransform(results: AnalysisResults, canvasW: number, canvas
   return { scale, toBoard };
 }
 
+// The pitch drawn like chalk on a dark green board: faint mowing stripes and
+// dashed white lines.
 function drawPitchMarkings(ctx: CanvasRenderingContext2D, results: AnalysisResults, canvasW: number, canvasH: number) {
   const { length: L, width: W } = results.pitch;
   const { scale, toBoard } = boardTransform(results, canvasW, canvasH);
-  ctx.fillStyle = "#14532d";
+  ctx.fillStyle = BOARD_GRASS;
   ctx.fillRect(0, 0, canvasW, canvasH);
   // Alternating mowing stripes.
   for (let i = 0; i < 10; i++) {
     if (i % 2) continue;
     const [x0, y0] = toBoard([(i * L) / 10, W]);
     const [x1, y1] = toBoard([((i + 1) * L) / 10, 0]);
-    ctx.fillStyle = "#166534";
+    ctx.fillStyle = BOARD_STRIPE;
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
   }
-  ctx.strokeStyle = "rgba(255,255,255,0.75)";
+  ctx.strokeStyle = withAlpha(CHALK, 0.7);
   ctx.lineWidth = Math.max(1, scale * 0.15);
+  ctx.setLineDash([Math.max(3, scale * 1.2), Math.max(2, scale * 0.7)]); // dashes look like chalk
   const rect = (x0: number, y0: number, x1: number, y1: number) => {
     const [ax, ay] = toBoard([x0, y1]);
     const [bx, by] = toBoard([x1, y0]);
@@ -270,6 +292,7 @@ function drawPitchMarkings(ctx: CanvasRenderingContext2D, results: AnalysisResul
   ctx.stroke();
   for (const [x0, x1] of [[0, 16.5], [L - 16.5, L]]) rect(x0, (W - 40.32) / 2, x1, (W + 40.32) / 2);
   for (const [x0, x1] of [[0, 5.5], [L - 5.5, L]]) rect(x0, (W - 18.32) / 2, x1, (W + 18.32) / 2);
+  ctx.setLineDash([]); // solid lines again for everything drawn after this
 }
 
 export interface BoardOptions {
@@ -303,7 +326,7 @@ export function drawBoard(
   }
 
   if (options.staticPath && options.staticPath.length > 1) {
-    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.strokeStyle = withAlpha(CHALK, 0.9);
     ctx.lineWidth = Math.max(1, scale * 0.25);
     ctx.beginPath();
     options.staticPath.map(toBoard).forEach((p, i) => (i === 0 ? ctx.moveTo(...p) : ctx.lineTo(...p)));
@@ -313,16 +336,21 @@ export function drawBoard(
   if (!state || options.showPeople === false) return;
   const located = state.people.filter((p): p is typeof p & { pitch: Point } => p.pitch !== null);
 
+  // Team shape: the area of each team's outfield players, faintly filled and
+  // outlined with dashes in the team's board colour.
   if (layers.shape) {
     for (const team of results.teams) {
       const points = located.filter((p) => p.team === team.id && p.role === ROLE.player).map((p) => toBoard(p.pitch));
       if (points.length < 3) continue;
+      const colour = boardColour(team.id, ROLE.player);
       fillPolygon(ctx, convexHull(points));
-      ctx.fillStyle = withAlpha(team.colour, 0.18);
+      ctx.fillStyle = withAlpha(colour, 0.1);
       ctx.fill();
-      ctx.strokeStyle = withAlpha(team.colour, 0.8);
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = withAlpha(colour, 0.8);
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      ctx.setLineDash([]);
     }
   }
 
@@ -330,36 +358,56 @@ export function drawBoard(
     for (const person of located) {
       if (selectedId !== null && person.id !== selectedId) continue;
       const trail = timeline.trail(person.id, state.time, TRAIL_SECONDS).concat([person.pitch]);
-      fadingPath(ctx, trail.map(toBoard), personColour(results, person.team, person.role), Math.max(1.5, scale * 0.3));
+      fadingPath(ctx, trail.map(toBoard), boardColour(person.team, person.role), Math.max(1.5, scale * 0.25));
     }
   }
 
-  const radius = Math.max(4, scale * 1.1);
-  ctx.font = `600 ${Math.max(8, radius * 1.1)}px system-ui, sans-serif`;
-  ctx.textAlign = "center";
+  // People: ○ for Team A, × for Team B, a small square for referees. The
+  // selected player gets an amber halo, and every player's number sits beside them.
+  const size = Math.max(4, scale * 1.1);
+  ctx.font = `500 ${Math.max(8, size * 1.05)}px "IBM Plex Mono", monospace`;
+  ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   for (const person of located) {
     const [x, y] = toBoard(person.pitch);
+    const colour = boardColour(person.team, person.role);
+    const selected = person.id === selectedId;
+    if (selected) {
+      ctx.beginPath();
+      ctx.arc(x, y, size * 2.1, 0, 2 * Math.PI);
+      ctx.fillStyle = withAlpha(AMBER, 0.25);
+      ctx.fill();
+    }
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = selected ? 2.6 : person.role === ROLE.goalkeeper ? 2.2 : 1.6;
     ctx.beginPath();
-    ctx.arc(x, y, person.id === selectedId ? radius * 1.35 : radius, 0, 2 * Math.PI);
-    ctx.fillStyle = personColour(results, person.team, person.role);
-    ctx.fill();
-    ctx.lineWidth = person.id === selectedId ? 3 : 1.2;
-    ctx.strokeStyle = person.id === selectedId ? "#ffffff" : "#0f172a";
-    ctx.stroke();
+    if (person.role === ROLE.referee) {
+      ctx.fillStyle = colour;
+      ctx.fillRect(x - size * 0.5, y - size * 0.5, size, size);
+    } else if (person.team === 1) {
+      ctx.moveTo(x - size, y - size);
+      ctx.lineTo(x + size, y + size);
+      ctx.moveTo(x + size, y - size);
+      ctx.lineTo(x - size, y + size);
+      ctx.stroke();
+    } else {
+      ctx.arc(x, y, size, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
     if (person.role !== ROLE.referee) {
-      ctx.fillStyle = "#0f172a";
-      ctx.fillText(String(person.id), x, y + 0.5);
+      ctx.fillStyle = selected ? AMBER : withAlpha(CHALK, 0.75);
+      ctx.fillText(String(person.id), x + size * 1.4, y - size * 0.9);
     }
   }
 
+  // The ball: a small white dot with a dark edge.
   if (layers.ball && state.ball?.pitch) {
     const [x, y] = toBoard(state.ball.pitch);
     ctx.beginPath();
-    ctx.arc(x, y, radius * 0.6, 0, 2 * Math.PI);
+    ctx.arc(x, y, size * 0.6, 0, 2 * Math.PI);
     ctx.fillStyle = "#ffffff";
     ctx.fill();
-    ctx.strokeStyle = "#0f172a";
+    ctx.strokeStyle = DARK;
     ctx.lineWidth = 1.5;
     ctx.stroke();
   }

@@ -1,0 +1,6 @@
+# Libraries for the system tests (tests/system/test_system.py).
+httpx==0.28.1
+numpy
+opencv-python-headless
+pytest
+python-socketio[client]

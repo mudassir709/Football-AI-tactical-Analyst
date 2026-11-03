@@ -52,6 +52,12 @@ export const analysisQueue = new Queue<AnalysisJobData>(QUEUE_NAME, {
 const healthConnection = redisConnection();
 export const pingRedis = () => healthConnection.ping();
 
+/** Close this module's Redis connections (on shutdown, and after the tests). */
+export async function closeQueue(): Promise<void> {
+  await analysisQueue.close();
+  healthConnection.disconnect();
+}
+
 /**
  * Number of workers connected to the queue. BullMQ's own getWorkersCount()
  * only recognises Node workers (it expects a base64 queue name in the Redis
