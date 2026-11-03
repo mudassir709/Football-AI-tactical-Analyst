@@ -10,7 +10,9 @@ Run (on the GPU machine, from the worker/ folder):
 
 Endpoints (all except /health need "Authorization: Bearer <token>"):
     GET    /health                 device information
-    POST   /jobs                   upload a video (form fields: file, mode) -> {"id": ...}
+    POST   /jobs                   create a job (form fields: mode, filename) -> {"id": ...}
+    PUT    /jobs/{id}/video        add the next piece of the video (?offset=<bytes so far>)
+    POST   /jobs/{id}/start        the whole video has arrived: start the analysis
     GET    /jobs/{id}              status, progress and summary
     GET    /jobs/{id}/results      results JSON (when completed)
     GET    /jobs/{id}/playback     browser-playable H.264 video (when completed)
@@ -33,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from src import config
@@ -49,6 +51,8 @@ if len(TOKEN) < 16:
 WORK_DIR = Path(os.environ.get("GPU_WORK_DIR", Path(tempfile.gettempdir()) / "tactical-gpu"))
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 JOB_TTL_SECONDS = 2 * 60 * 60  # forget finished jobs that were never collected
+UPLOAD_TTL_SECONDS = 6 * 60 * 60  # and uploads that were never finished
+MAX_CHUNK_BYTES = 100 * 1024 * 1024  # the worker sends 50 MB pieces
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"}
 
 
@@ -57,12 +61,14 @@ class JobState:
     id: str
     mode: str
     folder: Path
-    status: str = "queued"  # queued -> running -> completed | failed
+    video: Path
+    status: str = "uploading"  # uploading -> queued -> running -> completed | failed
     percent: float = 0.0
     stage: str = "Waiting for the GPU"
     error: str | None = None
     summary: dict[str, Any] | None = None
     finished_at: float | None = None
+    created_at: float = 0.0
 
     def public(self) -> dict[str, Any]:
         return {
@@ -106,10 +112,15 @@ def get_job(job_id: str) -> JobState:
 
 
 def purge_old_jobs() -> None:
-    """Delete jobs finished long ago whose files were never collected."""
-    cutoff = time.time() - JOB_TTL_SECONDS
+    """Delete jobs finished long ago whose files were never collected, and
+    uploads that stopped half-way."""
+    now = time.time()
     with jobs_lock:
-        stale = [j for j in jobs.values() if j.finished_at and j.finished_at < cutoff]
+        stale = [
+            j for j in jobs.values()
+            if (j.finished_at and j.finished_at < now - JOB_TTL_SECONDS)
+            or (j.status == "uploading" and j.created_at < now - UPLOAD_TTL_SECONDS)
+        ]
         for job in stale:
             jobs.pop(job.id, None)
     for job in stale:
@@ -137,15 +148,16 @@ def run_job(job: JobState, video: Path) -> None:
 @app.get("/health")
 def health() -> dict[str, Any]:
     with jobs_lock:
-        active = sum(j.status in ("queued", "running") for j in jobs.values())
+        active = sum(j.status in ("uploading", "queued", "running") for j in jobs.values())
     return {"status": "ok", "device": describe_device(), "activeJobs": active}
 
 
 @app.post("/jobs", dependencies=[Depends(require_token)])
-def create_job(file: UploadFile = File(...), mode: str = Form(config.DEFAULT_ANALYSIS_MODE)) -> dict[str, str]:
+def create_job(mode: str = Form(config.DEFAULT_ANALYSIS_MODE), filename: str = Form(...)) -> dict[str, str]:
+    """Step 1: create an empty job. The video follows in pieces (upload_chunk)."""
     if mode not in config.ANALYSIS_MODES:
         raise HTTPException(status_code=400, detail=f"Unknown mode {mode!r}")
-    extension = Path(file.filename or "").suffix.lower()
+    extension = Path(filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported video type")
     purge_old_jobs()
@@ -154,15 +166,49 @@ def create_job(file: UploadFile = File(...), mode: str = Form(config.DEFAULT_ANA
     folder = WORK_DIR / job_id
     folder.mkdir()
     video = folder / f"input{extension}"
-    with video.open("wb") as out:
-        shutil.copyfileobj(file.file, out, length=1024 * 1024)
-
-    job = JobState(id=job_id, mode=mode, folder=folder)
+    video.touch()  # empty for now
+    job = JobState(id=job_id, mode=mode, folder=folder, video=video, created_at=time.time())
     with jobs_lock:
         jobs[job_id] = job
-    executor.submit(run_job, job, video)
-    logger.info("Job %s queued (%s mode, %.1f MB)", job_id, mode, video.stat().st_size / 1e6)
     return {"id": job_id}
+
+
+@app.put("/jobs/{job_id}/video", dependencies=[Depends(require_token)])
+async def upload_chunk(job_id: str, offset: int, request: Request) -> dict[str, int]:
+    """Step 2: add one piece of the video to the end of the file.
+
+    ``offset`` is how many bytes the worker had sent before this piece. If it
+    doesn't match the file, the piece is either a repeat of the last one (its
+    answer got lost and the worker tried again), which we ignore, or
+    something went wrong.
+    """
+    job = get_job(job_id)
+    if job.status != "uploading":
+        raise HTTPException(status_code=409, detail="The upload is already finished")
+    chunk = await request.body()
+    if len(chunk) > MAX_CHUNK_BYTES:
+        raise HTTPException(status_code=413, detail="Piece too large")
+    size = job.video.stat().st_size
+    if offset == size:
+        with job.video.open("ab") as out:
+            out.write(chunk)
+    elif offset + len(chunk) != size:  # not a repeat of the last piece either
+        raise HTTPException(status_code=409, detail=f"Expected offset {size}, got {offset}")
+    return {"size": job.video.stat().st_size}
+
+
+@app.post("/jobs/{job_id}/start", dependencies=[Depends(require_token)])
+def start_job(job_id: str) -> dict[str, str]:
+    """Step 3: the whole video has arrived, so queue the analysis."""
+    job = get_job(job_id)
+    if job.status != "uploading":
+        raise HTTPException(status_code=409, detail="The job has already started")
+    if job.video.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail="No video was uploaded")
+    job.status, job.stage = "queued", "Waiting for the GPU"
+    executor.submit(run_job, job, job.video)
+    logger.info("Job %s queued (%s mode, %.1f MB)", job.id, job.mode, job.video.stat().st_size / 1e6)
+    return {"id": job.id}
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(require_token)])

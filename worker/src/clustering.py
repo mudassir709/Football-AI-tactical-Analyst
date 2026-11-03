@@ -77,7 +77,12 @@ def jersey_colour(crop: np.ndarray, grass_lab: np.ndarray | None = None) -> np.n
         hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
         grass = cv2.inRange(hsv, config.GRASS_HSV_LOWER, config.GRASS_HSV_UPPER).astype(bool)
     pixels = lab[~grass]
-    if len(pixels) < config.MIN_JERSEY_PIXELS:
+    # Normally we want 30 shirt pixels; for tiny far-away players, half of
+    # their shirt area is enough (see MIN_JERSEY_SHARE in config.py).
+    torso_pixels = torso.shape[0] * torso.shape[1]
+    needed = max(config.MIN_SMALL_JERSEY_PIXELS,
+                 min(config.MIN_JERSEY_PIXELS, config.MIN_JERSEY_SHARE * torso_pixels))
+    if len(pixels) < needed:
         return None
     return np.median(pixels, axis=0)
 

@@ -111,7 +111,7 @@ export function UploadPage() {
           ) : (
             <>
               <span className="font-hand text-2xl text-accent">Drop a video here</span>
-              <span className="text-sm text-dim">or click to choose · MP4, MOV, MKV, WebM or AVI · up to 500 MB</span>
+              <span className="text-sm text-dim">or click to choose · MP4, MOV, MKV, WebM or AVI · up to 1 GB</span>
             </>
           )}
         </button>

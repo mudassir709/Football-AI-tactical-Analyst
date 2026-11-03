@@ -50,6 +50,10 @@ ANALYSIS_MODES: dict[str, dict[str, int]] = {
     "quick": {"stride": 5, "imgsz": 960, "pitch_every": 2},  # for live demos
 }
 DEFAULT_ANALYSIS_MODE: str = "standard"
+# The strides above are written for 25 fps video (most broadcasts). A 50 fps
+# video gets twice the stride, so every video is analysed at the same number
+# of frames per second and takes about the same time per minute of football.
+REFERENCE_FPS: float = 25.0
 
 # Optional remote GPU analysis service (worker/gpu_server.py, e.g. on RunPod).
 # When GPU_SERVER_URL is set, the worker sends videos there and falls back to
@@ -157,6 +161,11 @@ GRASS_L_WEIGHT: float = 0.5
 GRASS_HSV_LOWER: tuple[int, int, int] = (35, 40, 40)
 GRASS_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
 MIN_JERSEY_PIXELS: int = 30
+# Far-away players in a wide camera view can be only 8 x 17 pixels, so their
+# whole shirt is smaller than 30 pixels. For them it is enough that this share
+# of the shirt area is not grass (but never fewer than MIN_SMALL_JERSEY_PIXELS).
+MIN_JERSEY_SHARE: float = 0.5
+MIN_SMALL_JERSEY_PIXELS: int = 6
 # A track is a goalkeeper if at least this share of its detections say so.
 GOALKEEPER_MIN_SHARE: float = 0.25
 

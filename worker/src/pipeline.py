@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from functools import cache
@@ -27,6 +28,7 @@ from typing import Any, TypeVar
 
 import numpy as np
 import pandas as pd
+import psutil
 
 from src import config
 from src.clustering import (
@@ -83,13 +85,29 @@ def _pitch_detector() -> PitchKeypointDetector:
 
 
 class _Progress:
-    """Forward progress to a callback, skipping updates smaller than 1 %."""
+    """Forward progress to a callback, skipping updates smaller than 1 %.
+
+    It also times each stage, so we can see where the processing time goes.
+    """
 
     def __init__(self, callback: ProgressCallback | None) -> None:
         self._callback = callback
         self._last: tuple[int, str] | None = None
+        self.stage_seconds: dict[str, float] = {}
+        self._stage: str | None = None
+        self._stage_started = time.perf_counter()
+
+    def finish_stage(self) -> None:
+        """Stop the clock for the current stage and save how long it took."""
+        if self._stage is not None:
+            self.stage_seconds[self._stage] = round(time.perf_counter() - self._stage_started, 1)
+        self._stage, self._stage_started = None, time.perf_counter()
 
     def __call__(self, percent: float, stage: str) -> None:
+        # A new stage has started: save the time of the previous one.
+        if stage != self._stage:
+            self.finish_stage()
+            self._stage = stage
         key = (int(percent), stage)
         if self._callback and key != self._last:
             self._last = key
@@ -101,6 +119,48 @@ class _Progress:
         for i, item in enumerate(items, start=1):
             yield item
             self(start + (end - start) * min(i / max(total, 1), 1.0), stage)
+
+
+class _MemoryMonitor:
+    """Measure the highest memory use while the analysis runs.
+
+    A background thread checks how much RAM this process uses twice a second
+    and keeps the highest value. On a GPU, PyTorch also tells us the most
+    graphics card memory it needed.
+    """
+
+    def __init__(self, interval_seconds: float = 0.5) -> None:
+        self._process = psutil.Process()
+        self._interval = interval_seconds
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+        self.peak_ram_bytes = self._process.memory_info().rss
+        self._cuda = config.DEVICE.startswith("cuda")
+
+    def _watch(self) -> None:
+        while not self._stop.wait(self._interval):
+            self.peak_ram_bytes = max(self.peak_ram_bytes, self._process.memory_info().rss)
+
+    def __enter__(self) -> _MemoryMonitor:
+        if self._cuda:
+            import torch
+
+            torch.cuda.reset_peak_memory_stats(config.DEVICE)  # forget earlier jobs
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._stop.set()
+        self._thread.join()
+
+    def results(self) -> dict[str, float | None]:
+        """The peaks in MB, ready to add to the summary."""
+        gpu_mb = None
+        if self._cuda:
+            import torch
+
+            gpu_mb = _num(torch.cuda.max_memory_reserved(config.DEVICE) / 1e6, 0)
+        return {"peakRamMb": _num(self.peak_ram_bytes / 1e6, 0), "peakGpuMemoryMb": gpu_mb}
 
 
 def run_analysis(
@@ -124,13 +184,21 @@ def run_analysis(
     """
     if mode not in config.ANALYSIS_MODES:
         raise ValueError(f"Unknown analysis mode {mode!r}")
-    settings = config.ANALYSIS_MODES[mode]
-    stride, pitch_stride = settings["stride"], settings["stride"] * settings["pitch_every"]
+    # Watch the memory use for the whole analysis and add it to the summary.
+    with _MemoryMonitor() as memory:
+        summary = _analyse(Path(video_path), Path(output_path), Path(playback_path), progress, mode)
+    summary.update(memory.results())
+    return summary
 
+
+def _analyse(
+    video_path: Path, output_path: Path, playback_path: Path,
+    progress: ProgressCallback | None, mode: str,
+) -> dict[str, Any]:
+    """The analysis itself; see run_analysis."""
+    settings = config.ANALYSIS_MODES[mode]
     started = time.perf_counter()
     report = _Progress(progress)
-    video_path, output_path = Path(video_path), Path(output_path)
-    info = get_video_info(video_path)
 
     # 0. Browser-playable copy (fast; also fails early on unreadable videos)
     playback_stage = "Preparing video for playback"
@@ -138,6 +206,16 @@ def run_analysis(
         video_path, playback_path,
         on_frame=lambda done, total: report(5 * done / max(total, 1), playback_stage),
     )
+    # From here on we analyse this H.264 copy instead of the upload. OpenCV can
+    # always read H.264 (not every machine can decode AV1 or HEVC), and the
+    # frame numbers then match the video the dashboard plays exactly.
+    video_path = playback_path
+    info = get_video_info(video_path)
+
+    # Analyse the same number of frames per second whatever the frame rate
+    # (every 2nd frame at 25 fps, every 4th at 50 fps; see config.REFERENCE_FPS).
+    stride = max(1, round(settings["stride"] * info.fps / config.REFERENCE_FPS))
+    pitch_stride = stride * settings["pitch_every"]
 
     # 1. Detection + tracking
     detector = _player_detector()
@@ -184,7 +262,12 @@ def run_analysis(
         info, stride, pitch_stride, mode, tracks, homographies, assignment, formations, shape, stats
     )
     _write_json_atomic(results, output_path)
+    report.finish_stage()
     summary = _build_summary(info, tracks, assignment, formations, shape, stats, time.perf_counter() - started)
+    # Extra numbers for measuring performance on long videos.
+    summary["stageSeconds"] = report.stage_seconds
+    summary["resultsSizeMb"] = _num(output_path.stat().st_size / 1e6, 1)
+    summary["playbackSizeMb"] = _num(playback_path.stat().st_size / 1e6, 1)
     report(100, "Done")
     return summary
 

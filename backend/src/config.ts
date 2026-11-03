@@ -19,7 +19,8 @@ const EnvSchema = z.object({
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   STORAGE_DIR: z.string().default("./storage"),
   FRONTEND_URL: z.string().default("http://localhost:5173"),
-  MAX_UPLOAD_MB: z.coerce.number().positive().default(500),
+  // 1 GB: enough for a full half of a match (about 45 minutes).
+  MAX_UPLOAD_MB: z.coerce.number().positive().default(1024),
   NODE_ENV: z.string().default("development"),
   // Send the login cookie over HTTPS only. Defaults to on in production; set
   // "false" when serving production builds over plain HTTP (e.g. a local demo).

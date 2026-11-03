@@ -21,7 +21,11 @@ ProgressCallback = Callable[[float, str], None]
 
 POLL_SECONDS = 2.0
 MAX_CONSECUTIVE_POLL_ERRORS = 15  # ~30 s of network trouble before giving up
-JOB_TIMEOUT_SECONDS = 2 * 60 * 60
+JOB_TIMEOUT_SECONDS = 4 * 60 * 60  # a full half takes about an hour on a GPU
+# The video is uploaded in pieces of this size. Proxies in front of cloud GPU
+# machines (like RunPod's) refuse very large single requests.
+CHUNK_BYTES = 50 * 1024 * 1024
+CHUNK_ATTEMPTS = 3  # retry a piece this many times if the network hiccups
 
 # Share of the progress bar used by each phase.
 UPLOAD_END, ANALYSIS_END = 5.0, 95.0
@@ -48,6 +52,29 @@ def _download(client: httpx.Client, url: str, target: Path) -> None:
     tmp.replace(target)
 
 
+def _upload_in_chunks(
+    client: httpx.Client, job_id: str, video_path: Path, on_progress: Callable[[float], None]
+) -> None:
+    """Send the video in 50 MB pieces. Each piece says where in the file it
+    starts (offset), so a piece that is sent twice is not added twice."""
+    size = video_path.stat().st_size
+    offset = 0
+    with video_path.open("rb") as video:
+        while chunk := video.read(CHUNK_BYTES):
+            for attempt in range(1, CHUNK_ATTEMPTS + 1):
+                try:
+                    client.put(
+                        f"/jobs/{job_id}/video", params={"offset": offset}, content=chunk
+                    ).raise_for_status()
+                    break
+                except httpx.TransportError:  # network trouble: wait a bit and try again
+                    if attempt == CHUNK_ATTEMPTS:
+                        raise
+                    time.sleep(2 * attempt)
+            offset += len(chunk)
+            on_progress(offset / max(size, 1))
+
+
 def run_remote_analysis(
     base_url: str,
     token: str,
@@ -65,14 +92,13 @@ def run_remote_analysis(
         try:
             device = client.get("/health").raise_for_status().json().get("device", "remote GPU")
             progress(0.0, f"Uploading video to {device}")
-            with video_path.open("rb") as video:
-                response = client.post(
-                    "/jobs",
-                    files={"file": (video_path.name, video, "video/mp4")},
-                    data={"mode": mode},
-                )
-            response.raise_for_status()
-            job_id = response.json()["id"]
+            # Create the job, send the video piece by piece, then start it.
+            job_id = client.post(
+                "/jobs", data={"mode": mode, "filename": video_path.name}
+            ).raise_for_status().json()["id"]
+            _upload_in_chunks(client, job_id, video_path, lambda share: progress(
+                UPLOAD_END * share, f"Uploading video to {device}"))
+            client.post(f"/jobs/{job_id}/start").raise_for_status()
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             raise RemoteUnavailable(f"GPU service unavailable: {exc}") from exc
         logger.info("Remote job %s started on %s", job_id, device)
