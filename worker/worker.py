@@ -15,11 +15,17 @@ job is analysed locally instead.
 The user can cancel a running analysis: the API leaves a note in Redis, the
 worker notices it within a few seconds, stops the analysis (also on the GPU)
 and reports the job as cancelled (see src/cancel.py).
+
+If the computer sleeps during a long analysis, BullMQ thinks the worker died
+and hands the same job out again after it wakes up. To avoid analysing a
+whole video twice, the worker saves a small "done" note next to the results
+(see finished_note); when the same job comes back, it returns that instead.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -61,6 +67,17 @@ async def process(job: Job, token: str) -> dict[str, Any]:
         raise
 
 
+def finished_note(match_id: str) -> Path:
+    """Where the "done" note of a match's last finished analysis is kept."""
+    return storage_path(f"results/{match_id}.done.json")
+
+
+def job_fingerprint(job: Job) -> str:
+    """Tells one run of a job apart from the next: a re-analysis creates a new
+    job (new creation time), while a job handed out again after a stall keeps it."""
+    return f"{job.id}:{job.timestamp}"
+
+
 async def analyse(job: Job) -> dict[str, Any]:
     """Analyse one uploaded match; the return value is sent back to the API."""
     match_id: str = job.data["matchId"]
@@ -68,6 +85,18 @@ async def analyse(job: Job) -> dict[str, Any]:
     mode: str = job.data.get("mode", config.DEFAULT_ANALYSIS_MODE)
     result_relative = f"results/{match_id}.json"
     playback_relative = f"videos/{match_id}_web.mp4"
+    outputs = (storage_path(result_relative), storage_path(playback_relative))
+    result = {"resultPath": result_relative, "playbackPath": playback_relative}
+
+    # This exact job already finished before (e.g. the computer slept and the
+    # queue handed it out again): send back the saved summary, don't redo it.
+    note = finished_note(match_id)
+    if note.exists() and all(path.exists() for path in outputs):
+        saved = json.loads(note.read_text(encoding="utf-8"))
+        if saved.get("job") == job_fingerprint(job):
+            logger.info("Job %s: already finished earlier; returning the saved result", match_id)
+            return {**result, "summary": saved["summary"]}
+
     logger.info("Job %s: analysing %s (%s mode)", match_id, video.name, mode)
 
     loop = asyncio.get_running_loop()
@@ -84,7 +113,6 @@ async def analyse(job: Job) -> dict[str, Any]:
             job.updateProgress({"percent": round(percent, 1), "stage": stage}), loop
         )
 
-    outputs = (storage_path(result_relative), storage_path(playback_relative))
     had_results = outputs[0].exists()  # from an earlier analysis of this match
     watcher = asyncio.create_task(watch_for_cancel(match_id, stop))
     # Both paths are slow, synchronous code. Running them in a thread keeps the
@@ -111,7 +139,12 @@ async def analyse(job: Job) -> dict[str, Any]:
         watcher.cancel()
 
     logger.info("Job %s: done in %.0f s on %s", match_id, summary["processingSeconds"], summary.get("processedOn"))
-    return {"resultPath": result_relative, "playbackPath": playback_relative, "summary": summary}
+    # Save the "done" note (see the top of this file). Written to a temporary
+    # file first, so a half-written note is never read.
+    temporary = note.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"job": job_fingerprint(job), "summary": summary}), encoding="utf-8")
+    temporary.replace(note)
+    return {**result, "summary": summary}
 
 
 async def watch_for_cancel(match_id: str, stop: threading.Event) -> None:

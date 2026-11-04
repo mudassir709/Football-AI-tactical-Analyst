@@ -217,6 +217,7 @@ matchesRouter.delete("/:id", async (req, res) => {
     removeFile(match.videoPath),
     removeFile(match.playbackPath),
     removeFile(match.resultPath),
+    removeFile(`results/${match.id}.done.json`), // the worker's "finished" note (worker/worker.py)
   ]);
   res.status(204).end();
 });
