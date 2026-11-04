@@ -1,0 +1,288 @@
+%% ==== architecture
+flowchart TB
+  subgraph Client["Client (web browser)"]
+    UI["React dashboard<br/>upload · overlays · 2D board · report"]
+  end
+  subgraph Server["Application server"]
+    NGINX["nginx<br/>static files + reverse proxy"]
+    API["Node.js API (Express 5)<br/>auth · uploads · jobs · cancel · Socket.IO"]
+    DB[("PostgreSQL 17<br/>users · matches")]
+    Q[("Redis 7.4<br/>BullMQ job queue · cancel notes")]
+    FS[["Shared file storage<br/>videos/ · results/"]]
+    W["Python AI worker<br/>YOLOv8 · ByteTrack · homography · clean-up<br/>K-Means · formations · positions · metrics"]
+  end
+  GPU["Cloud GPU service<br/>(optional, RunPod)"]
+  LLM["Azure OpenAI<br/>(coaching report)"]
+  UI -- "HTTP: REST + WebSocket" --> NGINX --> API
+  API --> DB
+  API -- "add job / job events" --> Q
+  Q -- "take job / progress" --> W
+  API --> FS
+  W --> FS
+  W -. "offload analysis" .-> GPU
+  API -. "statistics only" .-> LLM
+
+%% ==== deployment
+flowchart TB
+  USER(["User's browser"]) -->|"http://localhost:8080"| FE
+  subgraph Host["Docker host: docker compose --profile app"]
+    FE["frontend<br/>nginx:1.27-alpine<br/>port 8080 → 80"]
+    BE["backend<br/>node:24-alpine<br/>port 4000"]
+    WK["worker<br/>python:3.12-slim<br/>CPU PyTorch"]
+    PG[("postgres:17-alpine<br/>port 5432")]
+    RD[("redis:7.4-alpine<br/>port 6379")]
+    VOL[["./storage volume"]]
+    MOD[["./worker/models (read-only)"]]
+  end
+  FE -->|"/api, /socket.io"| BE
+  BE --> PG
+  BE --> RD
+  WK --> RD
+  BE --- VOL
+  WK --- VOL
+  WK --- MOD
+  WK -.->|"HTTPS + token"| GPU["GPU analysis service<br/>FastAPI on RunPod"]
+  BE -.->|HTTPS| AZ["Azure OpenAI"]
+  subgraph CI["GitHub"]
+    GA["GitHub Actions CI/CD"] --> GHCR[("ghcr.io images")]
+  end
+  GHCR -. "docker pull" .-> Host
+
+%% ==== sequence_upload
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant B as Browser (React)
+  participant A as API (Express)
+  participant D as PostgreSQL
+  participant Q as Redis queue
+  participant W as AI worker
+  U->>B: choose video,<br/>title, mode
+  B->>A: POST /api/matches<br/>(multipart)
+  A->>A: check extension, type,<br/>size, file signature
+  A->>D: INSERT match<br/>(QUEUED)
+  A->>Q: add job {matchId,<br/>videoPath, mode}
+  A-->>B: 201 Created<br/>{match}
+  B->>A: WebSocket connect<br/>(login cookie)
+  Q->>W: job becomes<br/>active
+  Q-->>A: event "active"
+  A->>D: status =<br/>PROCESSING
+  A-->>B: match:updated
+
+%% ==== sequence_progress
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant B as Browser (React)
+  participant A as API (Express)
+  participant D as PostgreSQL
+  participant Q as Redis queue
+  participant W as AI worker
+  loop every stage of the pipeline
+    W->>Q: updateProgress<br/>{percent, stage}
+    Q-->>A: event "progress"
+    A->>D: progress, stage
+    A-->>B: match:updated<br/>(progress bar moves)
+  end
+  W->>W: write results JSON,<br/>H.264 copy, "done" note
+  W->>Q: return {resultPath,<br/>playbackPath, summary}
+  Q-->>A: event "completed"
+  A->>D: status = COMPLETED,<br/>summary
+  A-->>B: match:updated
+  B->>A: GET /results and /video<br/>(Range requests)
+  B->>U: video with<br/>synchronised overlays
+
+%% ==== er
+erDiagram
+  User ||--o{ Match : "uploads"
+  User {
+    String id PK "cuid"
+    String email UK
+    String name
+    String passwordHash "bcrypt, cost 12"
+    DateTime createdAt
+  }
+  Match {
+    String id PK "cuid, also the job ID"
+    String userId FK
+    String title
+    MatchStatus status "QUEUED, PROCESSING, COMPLETED, FAILED, CANCELLED"
+    String analysisMode "standard or quick"
+    Int progress "0 to 100"
+    String stage "nullable"
+    String errorMessage "nullable"
+    String originalFilename
+    Int fileSizeBytes
+    String videoPath "relative to storage"
+    String playbackPath "nullable, H.264 copy"
+    String resultPath "nullable, results JSON"
+    Json summary "nullable, headline numbers"
+    String report "nullable, Markdown"
+    DateTime createdAt
+    DateTime updatedAt
+    DateTime completedAt "nullable"
+  }
+
+%% ==== status
+stateDiagram-v2
+  direction TB
+  [*] --> QUEUED: upload accepted
+  QUEUED --> PROCESSING: worker takes the job
+  PROCESSING --> COMPLETED: results written
+  PROCESSING --> QUEUED: error, retry left
+  PROCESSING --> FAILED: error on last attempt
+  QUEUED --> CANCELLED: Cancel
+  PROCESSING --> CANCELLED: Cancel, worker stops
+  COMPLETED --> QUEUED: Re-analyse
+  FAILED --> QUEUED: Re-analyse
+  CANCELLED --> QUEUED: Re-analyse
+  COMPLETED --> [*]: Delete
+  FAILED --> [*]: Delete
+  CANCELLED --> [*]: Delete
+  QUEUED --> [*]: Delete
+
+%% ==== pipeline
+flowchart LR
+  subgraph S1["Video, detection and pitch"]
+    direction TB
+    V[/"Uploaded video<br/>any codec, 25 or 50 fps"/] --> T["0 · H.264 playback copy · 0–5 %<br/>PyAV / libx264<br/>the analysis reads this copy"]
+    T --> DT["1 · Detection + tracking · 5–60 %<br/>YOLOv8x · stride scaled to 25 fps<br/>ByteTrack IDs · up to 5 ball candidates"]
+    DT --> KP["2 · Pitch keypoints · 60–88 %<br/>YOLOv8-pose, 32 landmarks<br/>RANSAC homography"]
+    KP --> HS["Camera model<br/>smoothed over 1.5 s"]
+    HS --> P["Project feet → pitch metres<br/>(105 × 68 m)"]
+  end
+  subgraph S2["Clean-up, teams and tactics"]
+    direction TB
+    C["Clean-up<br/>people off the pitch · real ball"] --> TA["3 · Teams · 88–93 %<br/>shirt colour vs local grass · K-Means<br/>referees by kit · goalkeepers by position"]
+    TA --> ST["4 · Tactics · 93–98 %<br/>join tracks · smoothing · ball gaps"]
+    ST --> F["Formations<br/>Hungarian matching · 20 s stability"]
+    F --> POS["Position labels<br/>slots of the main formation"]
+    ST --> M["Metrics<br/>shape · distance · speed · heatmaps"]
+    POS --> R[/"5 · results JSON v3 · 98–100 %"/]
+    M --> R
+  end
+  S1 --> S2
+
+%% ==== navigation
+flowchart TB
+  L["/login<br/>Log in"] <-->|link| RG["/register<br/>Create account"]
+  L -->|success| M
+  RG -->|success| M
+  subgraph APP["Protected area: header with Matches · Upload · Log out"]
+    M["/<br/>Matches list<br/>live progress rows"]
+    UP["/upload<br/>Upload a match"]
+    MP["/matches/:id<br/>Analysis page"]
+  end
+  M -->|"Upload a match"| UP
+  UP -->|"upload finished"| MP
+  M -->|"open a match"| MP
+  MP -->|"← all matches"| M
+  APP -->|"Log out / not logged in"| L
+  X["any other URL"] --> M
+
+%% ==== cicd
+flowchart TB
+  P["git push / pull request"] --> B & F & W
+  B["backend job<br/>PostgreSQL + Redis services<br/>tsc · Vitest + SuperTest (42)"]
+  F["frontend job<br/>oxlint · Vitest (23)<br/>tsc + vite build"]
+  W["worker job<br/>CPU torch<br/>pytest (43)"]
+  B & F & W --> S["system job<br/>whole platform in Docker · pytest system tests (11)"]
+  S --> I["images job, matrix of 3<br/>docker build backend · frontend · worker"]
+  I -->|"push to main only"| G[("ghcr.io/owner/tactical-eye-*")]
+
+%% ==== gpu_sequence
+sequenceDiagram
+  autonumber
+  participant W as Worker
+  participant G as GPU service (FastAPI)
+  W->>G: GET /health
+  alt unreachable or refused
+    W->>W: RemoteUnavailable, run pipeline locally
+  else available
+    W->>G: POST /jobs {mode, filename}
+    G-->>W: {id}
+    loop 50 MB pieces
+      W->>G: PUT /jobs/{id}/video?offset=n
+    end
+    W->>G: POST /jobs/{id}/start
+    loop every 2 seconds
+      W->>G: GET /jobs/{id}
+      G-->>W: {status, percent, stage}
+      W->>W: forward progress to the queue
+    end
+    opt user pressed Cancel
+      W->>G: POST /jobs/{id}/cancel
+    end
+    W->>G: GET /jobs/{id}/results and /playback
+    W->>G: DELETE /jobs/{id}
+  end
+
+%% ==== classes_worker
+classDiagram
+  direction LR
+  class FootballDetector {
+    +imgsz: int
+    +detect_batch(frames) list
+  }
+  class FootballTracker {
+    +update(detections, timestamp) tuple
+    +reset()
+    -_select_ball(balls) Detections
+  }
+  class PitchKeypointDetector {
+    +detect_batch(frames) list
+  }
+  class HomographyEstimator {
+    +max_reuse: int
+    +update(xy, confidence) tuple
+    +reset()
+  }
+  class Homography {
+    +matrix: ndarray 3x3
+    +n_inliers: int
+    +reprojection_error: float
+    +fit(image_points, pitch_points)$ Homography
+    +image_to_pitch(points) ndarray
+  }
+  class PitchDimensions {
+    +length: float = 105
+    +width: float = 68
+    +keypoints: ndarray 32x2
+  }
+  class TeamAssignment {
+    +track_teams: dict
+    +team_colours_bgr: ndarray
+    +agreement: Series
+    +referee_ids: frozenset
+    +team_colour_hex(team) str
+  }
+  class FormationResult {
+    +windows: DataFrame
+    +positions: DataFrame
+    +changes: DataFrame
+  }
+  HomographyEstimator --> Homography : creates
+  HomographyEstimator --> PitchDimensions : uses
+  FootballTracker ..> FootballDetector : consumes detections
+
+%% ==== frontend_components
+flowchart TB
+  MAIN["main.tsx<br/>BrowserRouter · AuthProvider"] --> APP["App.tsx (routes)"]
+  APP --> AUTH["AuthPage<br/>login or register"]
+  APP --> LAY["Layout<br/>header · login guard"]
+  LAY --> MS["MatchesPage"] --> MR["MatchRow × n"]
+  LAY --> UPL["UploadPage"] --> STEP["Step × 3"]
+  LAY --> MP["MatchPage<br/>progress · Cancel · Re-analyse"]
+  MP --> VA["VideoAnalysis<br/>video · overlay · full screen · board"]
+  MP --> SP["SummaryPanel"]
+  MP --> CR["CoachingReport"]
+  VA --> LEG["Legend"]
+  VA --> PP["PlayerPanel"]
+  VA -.-> TL["analysis/timeline.ts: Timeline"]
+  VA -.-> DR["analysis/draw.ts: drawVideoOverlay, drawBoard"]
+  DR -.-> GE["analysis/geometry.ts"]
+  MS -. "useMatchUpdates" .-> WS(("Socket.IO"))
+  MP -. "useMatchUpdates" .-> WS
+  AUTH -. "api.ts" .-> REST(("REST /api"))
+  UPL -. "api.ts" .-> REST
+  MP -. "api.ts" .-> REST

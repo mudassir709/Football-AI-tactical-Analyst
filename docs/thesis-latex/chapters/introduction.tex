@@ -1,0 +1,46 @@
+\chapter{Introduction}
+\label{ch:introduction}
+
+\section{Motivation}
+
+A youth or amateur coach who wants to know how compact the team stayed in the second half, or which shape the opponent defended in, has two options today. One is to buy data: clubs in the top leagues get tracking data from multi-camera systems installed in the stadium, from GPS vests, or from providers whose operators annotate every match by hand. The other option is to watch the video again with a notepad. The first is out of reach for almost everyone below professional level, and the second takes hours and produces no numbers at all.
+
+What these coaches usually do have is video. Matches are filmed from the stand, and broadcast footage of professional games is easy to obtain for study. The question I started from was therefore a practical one: how much of the professional tactical picture (positions in metres, team shape, formations, running distances) can be recovered automatically from a single broadcast camera, and how can it be shown so that a coach actually looks at it?
+
+Off-the-shelf tools did not answer this. Commercial analysis platforms sell their data per match and do not let the user analyse their own footage. The open-source computer vision examples that exist for football, such as the Roboflow \emph{sports} repository~\cite{roboflowsports}, are notebooks and scripts: they detect players in a clip and draw boxes, but they do not run as a service, do not survive a crash halfway through a 45-minute video, and have no interface a coach could use. I wanted a system that a non-technical user could open in a browser, upload a match to, and come back to later.
+
+The computer vision part has become feasible in recent years. Object detectors such as YOLOv8~\cite{yolov8} find players and the ball in milliseconds per frame, multi-object trackers such as ByteTrack~\cite{bytetrack} follow them over time, and classical projective geometry~\cite{hartley} maps the camera image onto a flat pitch. The engineering part turned out to be at least as demanding. On my laptop (Intel Core i7-1255U, 8\,GB RAM) the analysis of a 30-second clip took about 25 minutes, so it could never run inside a web request; a full half of 47 minutes later needed 54 minutes even on a rented NVIDIA L4 GPU. The results are also only useful when they are drawn on the video they came from, which means that the browser has to redraw every player, path and heatmap in sync with every displayed frame while the camera pans.
+
+\section{Objectives}
+
+The aim of the project was to build \textbf{Tactical Eye}, a web platform that turns football video into tactical information without any manual annotation. A user creates an account, uploads match footage through a dashboard, and follows the analysis live while it runs in the background. The analysis detects and tracks every player, goalkeeper, referee and the ball, maps them to pitch coordinates in metres, splits the players into two teams by shirt colour, recognises each team's formation over time and labels every player with a position such as left back or striker. From these trajectories it computes compactness, width and depth of each team, distances, speeds and heatmaps.
+
+The results had to be shown as interactive overlays on the video itself, next to a synchronised 2D tactical board, and a language model should turn the numbers into a short written coaching report. Architecturally, I wanted a distributed system from the start: a web API that only accepts jobs, a queue, and separate AI workers that can run on a CPU, on a local GPU or on a rented cloud GPU, with every service in a Docker container and an automated pipeline that tests and publishes the images.
+
+\section{Overview of the solution}
+
+Tactical Eye consists of four cooperating services (\autoref{fig:intro-architecture}). The \textbf{React dashboard} runs in the browser and handles uploads, live progress and the interactive analysis. The \textbf{Node.js API} authenticates users, stores the uploaded videos, keeps the matches in \textbf{PostgreSQL} and puts analysis jobs on a \textbf{Redis} queue. A \textbf{Python AI worker} takes the jobs, runs the computer vision pipeline and reports progress back through the queue; the API forwards every update to the user's browser over a WebSocket. The heavy part of the analysis can be sent to a rented cloud GPU, which cut the processing time of a 30-second clip from about 25 minutes to about 40 seconds. Finally, the API can ask a model on \textbf{Azure OpenAI} to write a coaching report from the computed statistics.
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.8\textwidth]{architecture}
+	\caption{High-level architecture of Tactical Eye}
+	\label{fig:intro-architecture}
+\end{figure}
+
+\autoref{fig:intro-analysis} shows the result from the user's side: the first half of a Barcelona--Real Madrid match, 20 minutes in, with every player marked by their position label, the referees marked in yellow, short movement paths on the grass, and the tactical board with both current formations on the right.
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=\textwidth]{11_match_page}
+	\caption{The analysis page of a full half: video overlays, tactical board and the formations of both teams}
+	\label{fig:intro-analysis}
+\end{figure}
+
+\section{Scope and limitations}
+
+The platform works from a single broadcast camera, so it only sees the part of the pitch that the camera shows at a given moment. It measures positions, movement and shape, not events: passes, shots and possession are not detected. Because the camera keeps leaving players out of the picture and their shirt numbers are only a few pixels tall, the system cannot know who a player is over a whole match; it labels players by the position they play instead (\autoref{sec:positions}). I tested the analysis on five 30-second clips from the DFL Bundesliga Data Shootout~\cite{dfl} and on two full halves of about 48 minutes each. \autoref{sec:limitations} discusses the remaining limits in detail.
+
+\section{Structure of the thesis}
+
+\autoref{ch:user} is the user documentation. It describes what the software is for, the hardware and software it needs, how to install and start it, and every function of the dashboard with screenshots and the messages it can show. \autoref{ch:developer} is the developer documentation: requirements, architecture, data design, the analysis algorithms, the modules of each service with the inputs and outputs of their important functions, and the main implementation decisions. \autoref{ch:testing} reports how the system was tested: the automated unit, API and system tests that run in the CI pipeline, the accuracy check against hand-annotated frames, the runs on full halves, and the defects these uncovered. \autoref{ch:conclusion} closes with what I learnt and what I would change.

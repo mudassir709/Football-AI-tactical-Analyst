@@ -1,0 +1,28 @@
+# LaTeX build files (latexmk makes them again)
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lol
+*.loa
+*.lot
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.xdv
+*.idx
+*.ilg
+*.ind
+*.nlo
+*.nls
+*-eps-converted-to.pdf
+# The finished PDF is not kept in the repository
+thesis.pdf
+
+# Private writing rules for the thesis (only on this laptop)
+CLAUDE.local.md
