@@ -22,11 +22,11 @@ PER_CLIP = 4  # frames per clip; 5 clips x 4 = 20 frames to annotate
 
 # Test clip -> its analysis results (match ID in storage/results).
 CLIPS = {
-    "sample": "cmvqif0ab000031o34exw7hnz",
-    "08fd33_0": "cmvqif0od000131o3tfgh10iu",
-    "121364_0": "cmvqif109000231o3gmz8aqn1",
-    "2e57b9_0": "cmvqif1d4000331o3x0rg09x1",
-    "573e61_0": "cmvqif1mz000431o3yzva2zv8",
+    "sample": "cmw1hnfoj000130rve1d3g2s7",
+    "08fd33_0": "cmw1hnfxm000230rvzjwi8jlh",
+    "121364_0": "cmw1hng61000330rvlu25c485",
+    "2e57b9_0": "cmw1hngfd000430rvsi9fr1eh",
+    "573e61_0": "cmw1hngo5000530rvrknmt5li",
 }
 
 

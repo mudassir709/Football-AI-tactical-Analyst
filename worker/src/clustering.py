@@ -219,6 +219,7 @@ def find_referees(
     roles: pd.Series,
     team_centres: np.ndarray,
     ratio: float = config.REFEREE_COLOUR_RATIO,
+    usual_positions: pd.DataFrame | None = None,
 ) -> set[int]:
     """Players and goalkeepers whose shirt matches the referees' kit.
 
@@ -228,16 +229,29 @@ def find_referees(
     track counts as a referee when its shirt is much closer to the referee
     colour than to the nearest team colour (see REFEREE_COLOUR_RATIO).
 
+    Goalkeepers wear a kit unlike both teams, so the colour test alone could
+    call them referees. A "goalkeeper" is therefore only checked if they
+    usually stand outside both penalty areas, which a real goalkeeper never does.
+
     Args:
         roles: Role of every track (``track_roles``).
         team_centres: ``(2, 3)`` Lab shirt colour of each team.
+        usual_positions: Median ``pitch_x``/``pitch_y`` per track, if known.
     """
     referee_rows = jersey_features[jersey_features["tracker_id"].isin(roles.index[roles == "referee"])]
     if referee_rows.empty:
         return set()
     referee_colour = referee_rows[JERSEY_FEATURE_COLUMNS].median().to_numpy()
 
-    candidate_ids = roles.index[roles.isin(["player", "goalkeeper"])]
+    candidate_ids = roles.index[roles == "player"]
+    if usual_positions is not None:
+        pitch = PitchDimensions()
+        in_box_x = (usual_positions["pitch_x"] < pitch.penalty_area_length) | (
+            usual_positions["pitch_x"] > pitch.length - pitch.penalty_area_length)
+        in_box_y = (usual_positions["pitch_y"] - pitch.width / 2).abs() < pitch.penalty_area_width / 2
+        outside_boxes = usual_positions.index[~(in_box_x & in_box_y)]
+        goalkeepers = roles.index[roles == "goalkeeper"]
+        candidate_ids = candidate_ids.union(goalkeepers.intersection(outside_boxes))
     colours = (jersey_features[jersey_features["tracker_id"].isin(candidate_ids)]
                .groupby("tracker_id")[JERSEY_FEATURE_COLUMNS].median())
     if colours.empty:
@@ -277,7 +291,10 @@ def assign_teams(
 
     # First split, then find referees dressed as "players", and split again without them.
     player_features, track_colours, kmeans = cluster(player_ids)
-    referee_ids = find_referees(jersey_features, roles, kmeans.cluster_centers_)
+    usual_positions = None
+    if {"pitch_x", "pitch_y"} <= set(tracks.columns) and tracks["pitch_x"].notna().any():
+        usual_positions = tracks.groupby("tracker_id")[["pitch_x", "pitch_y"]].median().dropna()
+    referee_ids = find_referees(jersey_features, roles, kmeans.cluster_centers_, usual_positions=usual_positions)
     if referee_ids:
         player_ids = player_ids.difference(list(referee_ids))
         goalkeeper_ids = [i for i in goalkeeper_ids if i not in referee_ids]
