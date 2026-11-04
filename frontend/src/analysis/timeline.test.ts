@@ -84,13 +84,49 @@ describe("paths", () => {
     expect(timeline.trail(7, 0.32, 0.17)).toEqual([[2, 30], [3, 30], [4, 30]]);
   });
 
-  it("fullPath returns every position of the player", () => {
-    expect(timeline.fullPath(7)).toHaveLength(5);
+  it("fullPath returns every position of the player, as one piece", () => {
+    expect(timeline.fullPath(7)).toHaveLength(1);
+    expect(timeline.fullPath(7)[0]).toHaveLength(5);
     expect(timeline.fullPath(99)).toEqual([]);
+  });
+
+  it("ballTrail stops at the last frame without a ball (no line across the pitch)", () => {
+    const withGap = new Timeline(results([
+      { f: 0, t: 0, p: [], b: [0, 0, 10, 10] },
+      { f: 2, t: 0.08, p: [], b: null }, // ball lost here
+      { f: 4, t: 0.16, p: [], b: [0, 0, 90, 50] },
+      { f: 6, t: 0.24, p: [], b: [0, 0, 91, 50] },
+    ]));
+    expect(withGap.ballTrail(0.24, 1)).toEqual([[90, 50], [91, 50]]);
   });
 
   it("knows whether the results include camera matrices (needed for video paths)", () => {
     expect(timeline.hasPitchMatrices).toBe(false);
+  });
+});
+
+describe("position labels (results v3)", () => {
+  // Track 7 plays left back (position 0) for two frames, then track 8 takes over.
+  const row = (track: number, x: number, position: number | null, role = 0): PersonRow =>
+    [track, 0, role, x, 100, x + 20, 160, x / 10, 30, position];
+  const timeline = new Timeline({
+    ...results([0, 1, 2, 3].map((i) => ({
+      f: i * 2, t: i * 0.08, b: null,
+      p: [row(i < 2 ? 7 : 8, 100 + i * 10, 0), row(9, 500, null), row(5, 800, null, 2)],
+    }))),
+    version: 3,
+    players: [{ id: 0, label: "LB", team: 0, role: "player", secondsVisible: 1, distanceM: 1, avgSpeedKmh: 1, maxSpeedKmh: 1, heatmap: [] }],
+  });
+
+  it("labels players by position, referees as REF, and leaves unknown positions blank", () => {
+    const [lb, unknown, referee] = timeline.stateAt(0).people;
+    expect([lb.label, lb.key]).toEqual(["LB", 0]);
+    expect([unknown.label, unknown.key]).toEqual(["", null]);
+    expect([referee.label, referee.key]).toEqual(["REF", null]);
+  });
+
+  it("splits a position's path where another player takes over", () => {
+    expect(timeline.fullPath(0)).toEqual([[[10, 30], [11, 30]], [[12, 30], [13, 30]]]);
   });
 });
 

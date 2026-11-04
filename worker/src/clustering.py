@@ -120,7 +120,10 @@ def extract_jersey_features(
     tracks: pd.DataFrame,
     samples_per_track: int = config.JERSEY_SAMPLES_PER_TRACK,
 ) -> pd.DataFrame:
-    """Sample shirt colours for every player and goalkeeper track.
+    """Sample shirt colours for every player, goalkeeper and referee track.
+
+    Referees are included so their kit colour can be learned (see
+    assign_teams), which lets us spot a referee the model called a player.
 
     The video is decoded once, sequentially (cheap compared with inference);
     only frames that contain a sampled detection are cropped.
@@ -133,7 +136,7 @@ def extract_jersey_features(
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     roles = track_roles(tracks)
-    outfield_ids = roles.index[roles.isin(["player", "goalkeeper"])]
+    outfield_ids = roles.index[roles.isin(["player", "goalkeeper", "referee"])]
     candidates = tracks[tracks["tracker_id"].isin(outfield_ids)]
     if candidates.empty:
         return pd.DataFrame(columns=["frame_idx", "tracker_id", *JERSEY_FEATURE_COLUMNS])
@@ -168,6 +171,9 @@ class TeamAssignment:
     track_teams: dict[int, int]  # tracker_id -> TEAM_A / TEAM_B
     team_colours_bgr: np.ndarray  # (2, 3) uint8 shirt colour of each team
     agreement: pd.Series  # per player track: share of crops voting for its team
+    # Tracks the model called player or goalkeeper but whose shirt matches the
+    # referees' kit; they are shown as referees and get no team.
+    referee_ids: frozenset[int] = frozenset()
 
     def team_colour_hex(self, team: int) -> str:
         """Shirt colour of ``team`` as ``#RRGGBB`` for plotting."""
@@ -208,12 +214,48 @@ def _assign_goalkeepers(
     return result
 
 
+def find_referees(
+    jersey_features: pd.DataFrame,
+    roles: pd.Series,
+    team_centres: np.ndarray,
+    ratio: float = config.REFEREE_COLOUR_RATIO,
+) -> set[int]:
+    """Players and goalkeepers whose shirt matches the referees' kit.
+
+    The model recognises the assistant referees well but sometimes calls the
+    main referee a player. So we learn the referee kit colour from the tracks
+    the model *does* call referees, then look for "players" wearing it: a
+    track counts as a referee when its shirt is much closer to the referee
+    colour than to the nearest team colour (see REFEREE_COLOUR_RATIO).
+
+    Args:
+        roles: Role of every track (``track_roles``).
+        team_centres: ``(2, 3)`` Lab shirt colour of each team.
+    """
+    referee_rows = jersey_features[jersey_features["tracker_id"].isin(roles.index[roles == "referee"])]
+    if referee_rows.empty:
+        return set()
+    referee_colour = referee_rows[JERSEY_FEATURE_COLUMNS].median().to_numpy()
+
+    candidate_ids = roles.index[roles.isin(["player", "goalkeeper"])]
+    colours = (jersey_features[jersey_features["tracker_id"].isin(candidate_ids)]
+               .groupby("tracker_id")[JERSEY_FEATURE_COLUMNS].median())
+    if colours.empty:
+        return set()
+    to_referee = np.linalg.norm(colours.to_numpy() - referee_colour, axis=1)
+    to_team = np.linalg.norm(colours.to_numpy()[:, None, :] - team_centres[None, :, :], axis=2).min(axis=1)
+    return set(colours.index[to_referee < ratio * to_team].astype(int))
+
+
 def assign_teams(
     tracks: pd.DataFrame,
     jersey_features: pd.DataFrame,
     random_state: int = 0,
 ) -> TeamAssignment:
     """Cluster player tracks into two teams by shirt colour, then place goalkeepers.
+
+    Tracks wearing the referees' kit (see find_referees) are taken out first,
+    so the referee never ends up in a team.
 
     Args:
         tracks: Tracks table; ``pitch_x``/``pitch_y`` are used for goalkeepers
@@ -225,13 +267,22 @@ def assign_teams(
     player_ids = roles.index[roles == "player"]
     goalkeeper_ids = list(roles.index[roles == "goalkeeper"])
 
-    player_features = jersey_features[jersey_features["tracker_id"].isin(player_ids)]
-    track_colours = player_features.groupby("tracker_id")[JERSEY_FEATURE_COLUMNS].median()
-    if len(track_colours) < 2:
-        raise ValueError(f"Need at least 2 player tracks with jersey colours, got {len(track_colours)}")
+    def cluster(ids) -> tuple[pd.DataFrame, pd.DataFrame, KMeans]:
+        """Split the shirt colours of these player tracks into two teams."""
+        features = jersey_features[jersey_features["tracker_id"].isin(ids)]
+        colours = features.groupby("tracker_id")[JERSEY_FEATURE_COLUMNS].median()
+        if len(colours) < 2:
+            raise ValueError(f"Need at least 2 player tracks with jersey colours, got {len(colours)}")
+        return features, colours, KMeans(n_clusters=2, n_init=10, random_state=random_state).fit(colours.to_numpy())
 
-    kmeans = KMeans(n_clusters=2, n_init=10, random_state=random_state)
-    labels = kmeans.fit_predict(track_colours.to_numpy())
+    # First split, then find referees dressed as "players", and split again without them.
+    player_features, track_colours, kmeans = cluster(player_ids)
+    referee_ids = find_referees(jersey_features, roles, kmeans.cluster_centers_)
+    if referee_ids:
+        player_ids = player_ids.difference(list(referee_ids))
+        goalkeeper_ids = [i for i in goalkeeper_ids if i not in referee_ids]
+        player_features, track_colours, kmeans = cluster(player_ids)
+    labels = kmeans.labels_
 
     # K-Means numbering is arbitrary; make it deterministic: lighter shirt = TEAM_A.
     order = np.argsort(-kmeans.cluster_centers_[:, 0])
@@ -252,7 +303,7 @@ def assign_teams(
     track_teams.update(_assign_goalkeepers(tracks, track_teams, goalkeeper_ids, position_columns))
 
     team_colours = np.stack([_lab_to_bgr(kmeans.cluster_centers_[i]) for i in order])
-    return TeamAssignment(track_teams, team_colours, agreement)
+    return TeamAssignment(track_teams, team_colours, agreement, frozenset(referee_ids))
 
 
 def add_team_column(tracks: pd.DataFrame, assignment: TeamAssignment) -> pd.DataFrame:
@@ -262,6 +313,8 @@ def add_team_column(tracks: pd.DataFrame, assignment: TeamAssignment) -> pd.Data
     team = tracks["tracker_id"].map(assignment.track_teams).fillna(config.NO_TEAM).astype(int)
     team[is_ball] = config.NO_TEAM
     role = tracks["tracker_id"].map(track_roles(tracks)).where(~is_ball, "ball")
+    # Referees the model mistook for players (they have no team, see find_referees).
+    role = role.mask(tracks["tracker_id"].isin(assignment.referee_ids) & ~is_ball, "referee")
     return tracks.assign(team=team, role=role)
 
 
@@ -392,6 +445,7 @@ def detect_formations(
     min_presence: float = config.FORMATION_MIN_PRESENCE,
     switch_margin: float = config.FORMATION_SWITCH_MARGIN,
     formations: tuple[str, ...] = config.FORMATIONS,
+    min_stable_seconds: float = config.FORMATION_MIN_STABLE_SECONDS,
 ) -> FormationResult:
     """Classify each team's formation in consecutive time windows.
 
@@ -402,6 +456,8 @@ def detect_formations(
             unclassified (the broadcast camera rarely shows everyone).
         min_presence: Share of a window's frames a player must appear in.
         switch_margin: Hysteresis margin, see ``config.FORMATION_SWITCH_MARGIN``.
+        min_stable_seconds: A new formation must win for this long before the
+            change is accepted, see ``config.FORMATION_MIN_STABLE_SECONDS``.
         formations: Candidate formation templates.
     """
     sides = defending_sides(tracks)
@@ -416,9 +472,12 @@ def detect_formations(
     ]
     outfield = to_attacking_frame(outfield, sides)
 
+    # How many windows in a row a new formation must win before we switch to it.
+    windows_needed = max(1, int(np.ceil(min_stable_seconds / window_seconds)))
     window_rows, position_rows = [], []
     for team, team_rows in outfield.groupby("team"):
         current: str | None = None
+        challenger, challenger_wins = None, 0  # the formation trying to take over
         for window, rows in team_rows.groupby("window"):
             per_player = rows.groupby("tracker_id").agg(
                 depth=("depth", "mean"), width=("width", "mean"),
@@ -440,8 +499,18 @@ def detect_formations(
             if len(players) >= min_players:
                 costs = match_formation(players[["depth", "width"]].to_numpy(), formations)
                 best, runner_up = sorted(costs, key=costs.get)[:2]
-                if current is None or costs[current] - costs[best] > switch_margin:
+                if current is None:
                     current = best
+                elif best != current and costs[current] - costs[best] > switch_margin:
+                    # Clearly better than the current formation: count how many
+                    # windows in a row it stays the best, and switch once it
+                    # has lasted long enough.
+                    challenger_wins = challenger_wins + 1 if best == challenger else 1
+                    challenger = best
+                    if challenger_wins >= windows_needed:
+                        current, challenger, challenger_wins = best, None, 0
+                else:
+                    challenger, challenger_wins = None, 0
                 row.update(
                     formation=current, best_match=best, cost=costs[current], runner_up=runner_up,
                     # Small margins mean the shape sits between two templates.

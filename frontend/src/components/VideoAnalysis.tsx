@@ -201,7 +201,7 @@ export function VideoAnalysis({
 
   const tabs: [Tab, string][] = [
     ["summary", "Summary"],
-    ["player", selectedId !== null ? `Player #${selectedId}` : "Player"],
+    ["player", selectedName(results, selectedId) ?? "Player"],
     ["report", "AI coaching report"],
   ];
 
@@ -435,18 +435,23 @@ function PlayerPanel({
   }
 
   // Missing numbers (e.g. a player who was only seen for a moment) show as "—".
-  const roleLabel = player.role === "goalkeeper" ? "Goalkeeper" : player.role === "referee" ? "Referee" : "Player";
+  // From results v3 a "player" is a position, so the title says e.g. "LB".
+  const roleLabel = player.label ?? (player.role === "goalkeeper" ? "Goalkeeper" : player.role === "referee" ? "Referee" : "Player");
   const value = (v: number | null, unit: string) => (v === null ? "—" : `${v} ${unit}`);
   return (
     <div className="grid gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <div>
         <canvas ref={canvasRef} className="aspect-[111/74] w-full" aria-label="Player heatmap and path" />
-        <p className="mt-2 font-mono text-[11px] text-dim">heatmap and full path over the analysed clip</p>
+        <p className="mt-2 font-mono text-[11px] text-dim">
+          {player.label
+            ? "heatmap and path of whoever played this position, over the analysed clip"
+            : "heatmap and full path over the analysed clip"}
+        </p>
       </div>
       <div className="space-y-6">
         <div className="flex items-baseline gap-3">
           <h3 className="text-xl font-semibold">
-            {roleLabel} #{player.id}
+            {player.label ? roleLabel : `${roleLabel} #${player.id}`}
           </h3>
           <span className="text-sm text-dim">{player.role !== "referee" && teamName(player.team)}</span>
           <button className="ml-auto text-xs text-dim hover:text-chalk" onClick={onClose}>
@@ -462,4 +467,13 @@ function PlayerPanel({
       </div>
     </div>
   );
+}
+
+// Name of the selected player for the tab title: the position ("Team A · LB")
+// in newer results, the track number ("Player #12") in older ones.
+function selectedName(results: AnalysisResults, selectedId: number | null): string | null {
+  if (selectedId === null) return null;
+  const player = results.players.find((p) => p.id === selectedId);
+  if (player?.label) return `${teamName(player.team)} · ${player.label}`;
+  return `Player #${selectedId}`;
 }

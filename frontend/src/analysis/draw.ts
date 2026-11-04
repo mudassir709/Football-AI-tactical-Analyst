@@ -145,14 +145,14 @@ export function drawVideoOverlay(
   // 3. Movement paths over the last few seconds, projected into this frame.
   if (layers.trails && h) {
     for (const person of state.people) {
-      if (selectedId !== null && person.id !== selectedId) continue;
+      if (selectedId !== null && person.key !== selectedId) continue;
       const trail = timeline.trail(person.id, state.time, TRAIL_SECONDS);
       const points = trail.map(pitchToCanvas).filter((p): p is Point => p !== null);
       // End at the detected feet, not the smoothed pitch position, which lags
       // a few pixels behind during sprints; the path then always meets the marker.
       points.push(toCanvas(person.foot));
       const colour = personColour(results, person.team, person.role);
-      fadingPath(ctx, points, colour, person.id === selectedId ? lineWidth * 1.6 : lineWidth);
+      fadingPath(ctx, points, colour, person.key === selectedId ? lineWidth * 1.6 : lineWidth);
     }
   }
 
@@ -165,7 +165,7 @@ export function drawVideoOverlay(
       const [fx, fy] = toCanvas(person.foot);
       const boxWidth = (person.box[2] - person.box[0]) * scale;
       const rx = Math.max(8, boxWidth * 0.65);
-      const selected = person.id === selectedId;
+      const selected = person.key !== null && person.key === selectedId;
       const colour = personColour(results, person.team, person.role);
 
       ctx.beginPath();
@@ -174,7 +174,10 @@ export function drawVideoOverlay(
       ctx.lineWidth = selected ? lineWidth * 1.8 : lineWidth;
       ctx.stroke();
 
-      const label = person.role === ROLE.goalkeeper ? `GK ${person.id}` : person.role === ROLE.referee ? "REF" : `${person.id}`;
+      // The label (LB, GK, REF...) in a small tag under the feet. Players
+      // whose position is unknown only get the ellipse.
+      const label = person.label;
+      if (!label) continue;
       const textW = ctx.measureText(label).width + 8;
       const textH = Math.max(14, 18 * scale * 1.4);
       const ly = fy + rx * 0.35 + textH / 2 + 2;
@@ -229,9 +232,9 @@ export function personAt(
     const dx = Math.max(offsetX + x1 * scale - clickX, 0, clickX - (offsetX + x2 * scale));
     const dy = Math.max(offsetY + y1 * scale - clickY, 0, clickY - (offsetY + y2 * scale));
     const distance = Math.hypot(dx, dy);
-    if (distance < bestDistance) {
+    if (person.key !== null && distance < bestDistance) {
       bestDistance = distance;
-      best = person.id;
+      best = person.key;
     }
   }
   return bestDistance <= 25 ? best : null;
@@ -297,7 +300,7 @@ function drawPitchMarkings(ctx: CanvasRenderingContext2D, results: AnalysisResul
 
 export interface BoardOptions {
   heatmapGrid?: number[][]; // overrides layers.heatmap (player panel)
-  staticPath?: Point[]; // whole-clip path of one player (player panel)
+  staticPath?: Point[][]; // whole-clip path of one player or position, in pieces (player panel)
   showPeople?: boolean;
 }
 
@@ -325,12 +328,14 @@ export function drawBoard(
     });
   }
 
-  if (options.staticPath && options.staticPath.length > 1) {
+  if (options.staticPath) {
     ctx.strokeStyle = withAlpha(CHALK, 0.9);
     ctx.lineWidth = Math.max(1, scale * 0.25);
-    ctx.beginPath();
-    options.staticPath.map(toBoard).forEach((p, i) => (i === 0 ? ctx.moveTo(...p) : ctx.lineTo(...p)));
-    ctx.stroke();
+    for (const piece of options.staticPath) {
+      ctx.beginPath();
+      piece.map(toBoard).forEach((p, i) => (i === 0 ? ctx.moveTo(...p) : ctx.lineTo(...p)));
+      ctx.stroke();
+    }
   }
 
   if (!state || options.showPeople === false) return;
@@ -356,7 +361,7 @@ export function drawBoard(
 
   if (layers.trails) {
     for (const person of located) {
-      if (selectedId !== null && person.id !== selectedId) continue;
+      if (selectedId !== null && person.key !== selectedId) continue;
       const trail = timeline.trail(person.id, state.time, TRAIL_SECONDS).concat([person.pitch]);
       fadingPath(ctx, trail.map(toBoard), boardColour(person.team, person.role), Math.max(1.5, scale * 0.25));
     }
@@ -371,7 +376,7 @@ export function drawBoard(
   for (const person of located) {
     const [x, y] = toBoard(person.pitch);
     const colour = boardColour(person.team, person.role);
-    const selected = person.id === selectedId;
+    const selected = person.key !== null && person.key === selectedId;
     if (selected) {
       ctx.beginPath();
       ctx.arc(x, y, size * 2.1, 0, 2 * Math.PI);
@@ -394,9 +399,9 @@ export function drawBoard(
       ctx.arc(x, y, size, 0, 2 * Math.PI);
       ctx.stroke();
     }
-    if (person.role !== ROLE.referee) {
+    if (person.role !== ROLE.referee && person.label) {
       ctx.fillStyle = selected ? AMBER : withAlpha(CHALK, 0.75);
-      ctx.fillText(String(person.id), x + size * 1.4, y - size * 0.9);
+      ctx.fillText(person.label, x + size * 1.4, y - size * 0.9);
     }
   }
 
@@ -429,9 +434,9 @@ export function personOnBoard(
     if (!person.pitch) continue;
     const [x, y] = toBoard(person.pitch);
     const distance = Math.hypot(x - clickX, y - clickY);
-    if (distance < bestDistance) {
+    if (person.key !== null && distance < bestDistance) {
       bestDistance = distance;
-      best = person.id;
+      best = person.key;
     }
   }
   return bestDistance <= Math.max(12, scale * 2.5) ? best : null;

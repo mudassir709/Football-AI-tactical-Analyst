@@ -2,8 +2,10 @@
 
 People (players, goalkeepers, referees) are tracked with ByteTrack so each keeps
 a stable ID. The ball is not given to ByteTrack: there is only one, it moves too
-fast for IoU matching, and it is frequently missed, so we simply keep the most
-confident ball detection per frame and interpolate gaps later in the pipeline.
+fast for IoU matching, and it is frequently missed. Instead we keep the few
+most confident "ball" detections per frame; once their pitch positions are
+known, cleanup.select_ball picks the real ball among them (spare balls and the
+penalty spot also look like a ball), and gaps are interpolated later.
 """
 
 from __future__ import annotations
@@ -39,11 +41,11 @@ class FrameTracks:
     timestamp: float  # seconds from the start of the video
     frame: np.ndarray  # BGR image, kept so callers can annotate it
     people: sv.Detections  # players, goalkeepers and referees, with tracker_id
-    ball: sv.Detections  # zero or one detection
+    ball: sv.Detections  # ball candidates, most confident first (at most MAX_BALL_CANDIDATES)
 
 
 class FootballTracker:
-    """ByteTrack for people plus single-best-detection selection for the ball."""
+    """ByteTrack for people; the ball's candidates are passed through untracked."""
 
     def __init__(
         self,
@@ -98,9 +100,9 @@ class FootballTracker:
 
     @staticmethod
     def _select_ball(balls: sv.Detections) -> sv.Detections:
-        """Keep only the most confident ball detection."""
-        if len(balls) > 1:
-            balls = balls[[int(np.argmax(balls.confidence))]]
+        """Keep the most confident ball candidates (the real one is chosen later)."""
+        order = np.argsort(-balls.confidence)[: config.MAX_BALL_CANDIDATES]
+        balls = balls[order]
         balls.tracker_id = np.full(len(balls), BALL_TRACK_ID, dtype=int)
         return balls
 

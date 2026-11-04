@@ -54,13 +54,19 @@ def team_shape(tracks: pd.DataFrame) -> pd.DataFrame:
 
 
 def player_stats(
-    tracks: pd.DataFrame, max_speed: float = config.MAX_PLAYER_SPEED
+    tracks: pd.DataFrame, max_speed: float = config.MAX_PLAYER_SPEED, by: tuple[str, ...] = ("tracker_id",),
 ) -> pd.DataFrame:
     """Distance and speed per person track (players, goalkeepers, referees).
 
     Steps across gaps (the track was lost for a while) or faster than
     ``max_speed`` m/s (an ID jump, not real running) are not counted.
     The top speed is the best one-second average, not the fastest single step.
+
+    Args:
+        by: What to add up the numbers for. By default each track; with
+            ``("team", "position")`` each position, e.g. Team A's left back.
+            Steps are always measured within one track, so moving from one
+            player to the next never counts as running.
     """
     people = tracks[(tracks["role"] != "ball") & tracks["pitch_x"].notna()]
     people = people.sort_values(["tracker_id", "frame_idx"])
@@ -82,9 +88,10 @@ def player_stats(
         lambda s: s.rolling(window, min_periods=window).mean()
     )
 
-    stats = people.groupby("tracker_id").agg(
-        team=("team", "first"),
-        role=("role", "first"),
+    people = people.dropna(subset=list(by))  # e.g. rows without a position label
+    first = {column: (column, "first") for column in ("team", "role") if column not in by}
+    stats = people.groupby(list(by)).agg(
+        **first,
         frames=("frame_idx", "nunique"),
         distance_m=("step", "sum"),
         max_speed=("speed_1s", "max"),

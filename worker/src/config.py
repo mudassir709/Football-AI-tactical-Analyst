@@ -106,7 +106,7 @@ DEFAULT_IMGSZ: int = 1280
 NMS_IOU: float = 0.5
 
 # Per-class confidence thresholds. The ball is small and often blurred, so it
-# gets a lower bar; false positives are cleaned up by keeping one ball per frame.
+# gets a lower bar; false positives are removed by cleanup.select_ball.
 CLASS_CONFIDENCE: dict[int, float] = {
     BALL_ID: 0.15,
     GOALKEEPER_ID: 0.30,
@@ -169,6 +169,42 @@ MIN_SMALL_JERSEY_PIXELS: int = 6
 # A track is a goalkeeper if at least this share of its detections say so.
 GOALKEEPER_MIN_SHARE: float = 0.25
 
+# A player or goalkeeper whose shirt is clearly closer to the referees' kit
+# colour than to their own team's colour is really a referee: their distance
+# to the referee colour must be below this share of the distance to the team.
+# Checked on the Barcelona - Real Madrid first half (referees in mint, close to
+# Real Madrid's white): below 0.65 almost every track was an official, above
+# about 0.68 white Real Madrid players start to appear.
+REFEREE_COLOUR_RATIO: float = 0.65
+
+# --- Clean-up defaults (src/cleanup.py) ----------------------------------------
+# People whose usual (median) position is further than this outside the pitch
+# lines are substitutes, coaches or staff, not part of the game.
+OFF_PITCH_MARGIN_M: float = 0.5
+# The model finds up to this many "balls" per frame (spare balls, the penalty
+# spot...); cleanup.select_ball picks the real one.
+MAX_BALL_CANDIDATES: int = 5
+# Ball candidates further than this outside the pitch are ignored.
+BALL_OFF_PITCH_MARGIN_M: float = 1.0
+# The fastest a ball can move (about 145 km/h, a very hard shot), plus a
+# margin for measurement error. A candidate further away than the ball could
+# have travelled since the last frame is a different object.
+BALL_MAX_SPEED_MS: float = 40.0
+BALL_POSITION_TOLERANCE_M: float = 2.0
+# After the ball has been lost for this long, we stop following its path and
+# start again from the most confident candidate.
+BALL_LOST_SECONDS: float = 1.0
+# The penalty spots look like a ball. A candidate this close to a spot is only
+# accepted if we followed the ball there.
+PENALTY_SPOT_RADIUS_M: float = 1.0
+# Two pieces of track are joined into one player when the second starts at
+# most this many seconds after the first ends...
+STITCH_MAX_GAP_SECONDS: float = 5.0
+# ...and no further away than a player could run in that time (7 m/s, a fast
+# run) plus a margin for measurement error.
+STITCH_MAX_SPEED_MS: float = 7.0
+STITCH_POSITION_TOLERANCE_M: float = 2.0
+
 # --- Trajectory defaults -----------------------------------------------------
 # Centred rolling mean over this span removes box jitter from pitch positions.
 SMOOTHING_WINDOW_SECONDS: float = 1.0
@@ -180,8 +216,9 @@ BALL_MAX_GAP_SECONDS: float = 1.0
 FORMATIONS: tuple[str, ...] = (
     "4-4-2", "4-3-3", "4-2-3-1", "4-1-4-1", "4-5-1", "3-5-2", "3-4-3", "5-3-2", "5-4-1",
 )
-# Positions are averaged over windows of this length before matching. Short for
-# the 30 s sample clip; use 60-300 s for full matches.
+# Positions are averaged over windows of this length before matching. Short, so
+# 30 s clips get several windows; on long videos FORMATION_MIN_STABLE_SECONDS
+# stops brief wobbles from counting as formation changes.
 FORMATION_WINDOW_SECONDS: float = 5.0
 # A window is only classified if this many outfield players are visible...
 FORMATION_MIN_PLAYERS: int = 8
@@ -192,6 +229,10 @@ FORMATION_MIN_PRESENCE: float = 0.5
 # the sample clip, best-vs-runner-up gaps were 0.001-0.025, so 0.03 sits just
 # above that noise level.
 FORMATION_SWITCH_MARGIN: float = 0.03
+# A new formation must also be the best match for this long before we accept
+# the change. Without it, a full half showed 282 changes: brief wobbles between
+# two similar shapes (e.g. 4-1-4-1 and 4-5-1) each counted as a new formation.
+FORMATION_MIN_STABLE_SECONDS: float = 20.0
 
 # --- Metrics defaults --------------------------------------------------------
 # Heatmap grid over the 105 x 68 m pitch: 21 x 14 cells of 5 x ~4.9 m.

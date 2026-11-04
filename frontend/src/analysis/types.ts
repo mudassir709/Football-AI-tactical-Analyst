@@ -1,8 +1,9 @@
 // Shape of the analysis results file written by the Python worker
 // (see worker/src/pipeline.py, `_build_results`).
 
-/** [id, team, role, x1, y1, x2, y2, pitchX, pitchY]; image coords in source-video pixels. */
-export type PersonRow = [number, number, number, number, number, number, number, number | null, number | null];
+/** [id, team, role, x1, y1, x2, y2, pitchX, pitchY, position]; image coords in source-video pixels.
+ *  id is the track; position (results v3+) is the entry in `players` this person counts towards. */
+export type PersonRow = [number, number, number, number, number, number, number, number | null, number | null, (number | null)?];
 /** [x, y, pitchX, pitchY] */
 export type BallRow = [number | null, number | null, number | null, number | null];
 
@@ -14,8 +15,10 @@ export interface ResultFrame {
   h?: number[] | null; // pitch (m) -> image (px) 3x3 matrix, row-major (results v2+)
 }
 
+/** One player track (results v1-v2) or, from v3, one position of a team (e.g. Team A's LB). */
 export interface PlayerResult {
   id: number;
+  label?: string; // the position, e.g. "LB" (results v3+)
   team: number;
   role: "player" | "goalkeeper" | "referee";
   secondsVisible: number | null;

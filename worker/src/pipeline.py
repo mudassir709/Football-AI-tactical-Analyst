@@ -31,6 +31,7 @@ import pandas as pd
 import psutil
 
 from src import config
+from src.cleanup import remove_off_pitch_people, select_ball, stitch_tracks
 from src.clustering import (
     TeamAssignment,
     add_team_column,
@@ -49,6 +50,7 @@ from src.homography import (
     project_tracks,
 )
 from src.metrics import heatmap, player_stats, team_shape
+from src.positions import POSITION_ORDER, assign_positions
 from src.tracker import frame_tracks_to_dataframe, iter_tracks
 from src.transcode import make_web_video
 from src.trajectories import interpolate_ball, smooth_positions
@@ -59,7 +61,7 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[float, str], None]
 T = TypeVar("T")
 
-RESULTS_VERSION = 2  # 2: per-frame pitch -> image matrix "h"
+RESULTS_VERSION = 3  # 2: per-frame pitch -> image matrix "h"; 3: position labels
 ROLE_CODES = {"player": 0, "goalkeeper": 1, "referee": 2}
 
 
@@ -235,6 +237,9 @@ def _analyse(
                        "Mapping positions to the pitch")
     )
     tracks = project_tracks(tracks, homographies, max_frame_gap=pitch_stride)
+    # Now that we know where everything is on the pitch: remove people standing
+    # on the sidelines and pick the real ball among the "ball" detections.
+    tracks = select_ball(remove_off_pitch_people(tracks))
 
     # 3. Teams
     report(88, "Assigning teams")
@@ -251,15 +256,20 @@ def _analyse(
 
     # 4. Tactics
     report(93, "Analysing tactics")
+    # Join the broken pieces of each player's track and renumber from 1.
+    tracks = stitch_tracks(tracks)
     tracks = interpolate_ball(smooth_positions(tracks))
     formations = detect_formations(tracks) if assignment else None
+    # Label every player with their position (LB, CM, ST...); see positions.py.
+    tracks["position"] = assign_positions(tracks, formations)
     shape = team_shape(tracks)
-    stats = player_stats(tracks)
+    stats = player_stats(tracks)  # per track, for the team totals in the summary
+    position_stats = player_stats(tracks, by=("team", "position"))  # per position, for the dashboard
 
     # 5. Export
     report(98, "Saving results")
     results = _build_results(
-        info, stride, pitch_stride, mode, tracks, homographies, assignment, formations, shape, stats
+        info, stride, pitch_stride, mode, tracks, homographies, assignment, formations, shape, position_stats
     )
     _write_json_atomic(results, output_path)
     report.finish_stage()
@@ -323,12 +333,16 @@ def _pitch_to_image_matrices(
     return matrices
 
 
-def _build_frames(tracks: pd.DataFrame, pitch_to_image: dict[int, list[float]]) -> list[dict[str, Any]]:
+def _build_frames(
+    tracks: pd.DataFrame, pitch_to_image: dict[int, list[float]], position_ids: dict[tuple[int, str], int],
+) -> list[dict[str, Any]]:
     """One entry per processed frame with every person and the ball.
 
     Person rows are compact arrays (see ``legend`` in the results file):
-    ``[id, team, role, x1, y1, x2, y2, pitch_x, pitch_y]``. ``h`` is the
-    frame's pitch -> image matrix, or null when the pitch was not recognised.
+    ``[id, team, role, x1, y1, x2, y2, pitch_x, pitch_y, position]``. ``id`` is
+    the track (used to draw smooth movement), ``position`` the entry in
+    ``players`` this person counts towards. ``h`` is the frame's
+    pitch -> image matrix, or null when the pitch was not recognised.
     """
     frames = []
     for frame_idx, group in tracks.groupby("frame_idx", sort=True):
@@ -341,6 +355,7 @@ def _build_frames(tracks: pd.DataFrame, pitch_to_image: dict[int, list[float]]) 
                 int(row.tracker_id), int(row.team), ROLE_CODES.get(row.role, 0),
                 _num(row.x1, 0), _num(row.y1, 0), _num(row.x2, 0), _num(row.y2, 0),
                 _num(row.pitch_x), _num(row.pitch_y),
+                position_ids.get((int(row.team), row.position)),
             ])
         frames.append({
             "f": int(frame_idx), "t": _num(group["timestamp"].iat[0], 3),
@@ -351,7 +366,7 @@ def _build_frames(tracks: pd.DataFrame, pitch_to_image: dict[int, list[float]]) 
 
 def _build_results(
     info, stride: int, pitch_stride: int, mode: str, tracks: pd.DataFrame, homographies: pd.DataFrame,
-    assignment: TeamAssignment | None, formations, shape: pd.DataFrame, stats: pd.DataFrame,
+    assignment: TeamAssignment | None, formations, shape: pd.DataFrame, position_stats: pd.DataFrame,
 ) -> dict[str, Any]:
     pitch = PitchDimensions()
     teams = []
@@ -363,16 +378,26 @@ def _build_results(
         ]
 
     people = tracks[tracks["role"] != "ball"]
+    # One entry per position of each team (Team A's LB, ...), in a natural
+    # order: goalkeeper, then defence to attack. Referees are left out: their
+    # numbers would mix the referee and both assistants.
+    teams_positions = position_stats[(position_stats["team"] != config.NO_TEAM) & (position_stats["position"] != "REF")]
+    rank = {name: i for i, name in enumerate(POSITION_ORDER)}
+    teams_positions = teams_positions.assign(
+        order=teams_positions["position"].map(rank).fillna(len(rank))
+    ).sort_values(["team", "order", "position"])
+    position_ids = {(int(s.team), s.position): i for i, s in enumerate(teams_positions.itertuples())}
     players = [
         {
-            "id": int(s.tracker_id), "team": int(s.team), "role": s.role,
+            "id": position_ids[(int(s.team), s.position)], "label": s.position,
+            "team": int(s.team), "role": s.role,
             "secondsVisible": _num(s.seconds_visible, 1),
             "distanceM": _num(s.distance_m, 1),
             "avgSpeedKmh": _num(s.avg_speed_kmh, 1),
             "maxSpeedKmh": _num(s.max_speed_kmh, 1),
-            "heatmap": heatmap(*_xy(people[people["tracker_id"] == s.tracker_id])),
+            "heatmap": heatmap(*_xy(people[(people["team"] == s.team) & (people["position"] == s.position)])),
         }
-        for s in stats.itertuples()
+        for s in teams_positions.itertuples()
     ]
 
     team_heatmaps = {
@@ -406,7 +431,8 @@ def _build_results(
         },
         "pitch": {"length": pitch.length, "width": pitch.width},
         "legend": {
-            "person": ["id", "team", "role", "x1", "y1", "x2", "y2", "pitchX", "pitchY"],
+            "person": ["id", "team", "role", "x1", "y1", "x2", "y2", "pitchX", "pitchY", "position"],
+            "position": "index into players (a position such as Team A's LB), or null if unknown",
             "ball": ["x", "y", "pitchX", "pitchY"],
             "h": "per-frame pitch (metres) -> image (pixels) 3x3 matrix, row-major; null if unknown",
             "roles": {str(code): name for name, code in ROLE_CODES.items()},
@@ -415,7 +441,8 @@ def _build_results(
         },
         "teams": teams,
         "frames": _build_frames(
-            tracks, _pitch_to_image_matrices(tracks["frame_idx"].unique(), homographies, pitch_stride)
+            tracks, _pitch_to_image_matrices(tracks["frame_idx"].unique(), homographies, pitch_stride),
+            position_ids,
         ),
         "players": players,
         "teamShape": [
