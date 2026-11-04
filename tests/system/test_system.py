@@ -216,8 +216,12 @@ def test_full_analysis_with_live_updates_and_ownership():
 
     # The full results file has the parts the dashboard draws.
     results = owner.get(f"/api/matches/{match_id}/results").json()
-    assert results["version"] == 2 and len(results["frames"]) == summary["framesAnalysed"]
+    assert results["version"] == 3 and len(results["frames"]) == summary["framesAnalysed"]
     assert {"players", "teamShape", "heatmaps", "formations"} <= results.keys()
+    # Version 3: players are listed by position (LB, CM...), and every person
+    # row ends with the position they count towards.
+    assert results["players"] and all(p["label"] for p in results["players"])
+    assert all(len(row) == 10 for frame in results["frames"] for row in frame["p"])
 
     # The video can be streamed in pieces (needed for seeking in the player).
     piece = owner.get(f"/api/matches/{match_id}/video", headers={"Range": "bytes=0-999"})
