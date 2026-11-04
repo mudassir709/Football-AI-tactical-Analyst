@@ -76,6 +76,9 @@ export function VideoAnalysis({
   // Direct handles to the video element and the two canvases.
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  // The video, its drawings and the controls together; this is what goes full screen.
+  const playerRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const boardRef = useRef<HTMLCanvasElement>(null);
 
   // What the user has chosen: visible layers, selected player, playback state, open tab.
@@ -85,6 +88,18 @@ export function VideoAnalysis({
   const [duration, setDuration] = useState(results.video.durationSeconds);
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
+
+  // Keep "fullscreen" up to date, also when the user leaves full screen with Esc.
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === playerRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  // The full-screen button: enter full screen, or leave it if already there.
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void playerRef.current?.requestFullscreen();
+  };
   const [tab, setTab] = useState<Tab>("summary");
 
   // The drawing loop reads the current layer settings from this ref. That way
@@ -209,11 +224,19 @@ export function VideoAnalysis({
     <div className="space-y-8">
       {/* Video (about 60 %) and tactical board (about 40 %) side by side on wide screens. */}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-        <div>
+        {/* In full screen this whole block fills the screen on a dark background. */}
+        <div ref={playerRef} className={fullscreen ? "flex flex-col justify-center overflow-auto bg-pitch p-6" : ""}>
           <div className="border border-line bg-pitch-2 p-1.5">
             {/* The video and the drawing canvas are stacked exactly on top of each other.
                 The video's events keep the controls (time, play button) up to date. */}
-            <div className="relative bg-black" style={{ aspectRatio: `${results.video.width} / ${results.video.height}` }}>
+            <div
+              className="relative mx-auto bg-black"
+              style={{
+                aspectRatio: `${results.video.width} / ${results.video.height}`,
+                // In full screen, as wide as fits while leaving room for the controls below.
+                width: fullscreen ? `min(100%, calc((100vh - 170px) * ${results.video.width / results.video.height}))` : undefined,
+              }}
+            >
               <video
                 ref={videoRef}
                 src={videoUrl}
@@ -235,6 +258,16 @@ export function VideoAnalysis({
                 onClick={onOverlayClick}
                 aria-label="Tactical overlay. Click a player to inspect them."
               />
+              {/* Full-screen button in the bottom-right corner of the video. */}
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="absolute right-2 bottom-2 rounded bg-pitch/80 p-1.5 text-chalk hover:bg-pitch hover:text-accent"
+                title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
+                aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+              >
+                <FullscreenIcon exit={fullscreen} />
+              </button>
             </div>
           </div>
 
@@ -476,4 +509,17 @@ function selectedName(results: AnalysisResults, selectedId: number | null): stri
   const player = results.players.find((p) => p.id === selectedId);
   if (player?.label) return `${teamName(player.team)} · ${player.label}`;
   return `Player #${selectedId}`;
+}
+
+// The four-corners icon on the full-screen button; the corners point inwards
+// when pressing it will leave full screen.
+function FullscreenIcon({ exit }: { exit: boolean }) {
+  const corners = exit
+    ? "M6 1v5H1M10 1v5h5M6 15v-5H1M10 15v-5h5"
+    : "M1 6V1h5M15 6V1h-5M1 10v5h5M15 10v5h-5";
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d={corners} />
+    </svg>
+  );
 }
