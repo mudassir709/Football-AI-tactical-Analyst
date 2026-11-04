@@ -48,6 +48,7 @@ from src.homography import (
     homographies_to_dataframe,
     iter_homographies,
     project_tracks,
+    smooth_homographies,
 )
 from src.metrics import heatmap, player_stats, team_shape
 from src.positions import POSITION_ORDER, assign_positions
@@ -236,6 +237,8 @@ def _analyse(
         report.iterate(homography_frames, math.ceil(info.total_frames / pitch_stride), 60, 88,
                        "Mapping positions to the pitch")
     )
+    # Remove small wobbles of the camera model (see smooth_homographies).
+    homographies = smooth_homographies(homographies, (info.width, info.height), info.fps)
     tracks = project_tracks(tracks, homographies, max_frame_gap=pitch_stride)
     # Now that we know where everything is on the pitch: remove people standing
     # on the sidelines and pick the real ball among the "ball" detections.

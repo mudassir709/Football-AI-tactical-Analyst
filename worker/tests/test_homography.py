@@ -63,3 +63,19 @@ def test_exported_matrices_are_finite_when_last_entry_is_zero():
     # Sign convention: points on the pitch have positive depth.
     h = np.array(matrices[0]).reshape(3, 3)
     assert h[2] @ [52.5, 34.0, 1.0] > 0
+
+
+def test_smoothing_removes_a_one_frame_wobble_but_follows_a_camera_pan():
+    from src.homography import HOMOGRAPHY_COLUMNS, smooth_homographies
+
+    # A camera panning steadily: the picture shows the pitch 0.2 m further
+    # right every frame. Frame 30 has a bad fit, shifted 5 m sideways.
+    rows = []
+    for i in range(60):
+        shift = 0.2 * i + (5.0 if i == 30 else 0.0)
+        matrix = np.array([[0.05, 0, shift], [0, 0.05, 0], [0, 0, 1]])  # image px -> pitch m
+        rows.append({"frame_idx": i * 6, "valid": True, **dict(zip(HOMOGRAPHY_COLUMNS, matrix.ravel()))})
+    smoothed = smooth_homographies(pd.DataFrame(rows), image_size=(1920, 1080), fps=25)
+    shifts = smoothed["h2"].to_numpy()
+    assert abs(shifts[30] - 0.2 * 30) < 0.3  # the wobble is gone
+    assert abs(shifts[50] - 0.2 * 50) < 0.3  # the pan is still followed

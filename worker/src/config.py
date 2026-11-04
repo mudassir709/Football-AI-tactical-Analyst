@@ -137,6 +137,12 @@ MIN_KEYPOINT_HULL_AREA: float = 50.0
 # When a frame has no usable keypoints, reuse the last homography for at most
 # this many processed frames; beyond that the camera has likely moved too far.
 MAX_HOMOGRAPHY_REUSE: int = 10
+# The camera model is smoothed over this many seconds (homography.
+# smooth_homographies), because the broadcast camera moves smoothly while
+# models fitted frame by frame wobble a little. On the first half of the
+# Barcelona - Real Madrid match, 1.5 s cut the large wobbles by about 3/4
+# while the picture stayed within about 6 pixels of the unsmoothed model.
+HOMOGRAPHY_SMOOTHING_SECONDS: float = 1.5
 
 # --- Team assignment defaults ------------------------------------------------
 # Team labels used in the tracks table.

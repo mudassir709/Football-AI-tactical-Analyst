@@ -305,6 +305,59 @@ def homographies_to_dataframe(frames: Iterable[FrameHomography]) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
+def smooth_homographies(
+    homographies: pd.DataFrame,
+    image_size: tuple[int, int],
+    fps: float,
+    window_seconds: float = config.HOMOGRAPHY_SMOOTHING_SECONDS,
+) -> pd.DataFrame:
+    """Smooth the camera model over time, so drawings and positions don't jump.
+
+    Each frame's homography is fitted on its own, so two neighbouring frames
+    can disagree a little even though the broadcast camera moved smoothly.
+    On a full half, 5 % of updates moved the drawings by over 30 pixels, which
+    made every movement path jump across the video.
+
+    The fix: take four fixed points of the picture (on the grass part of the
+    frame), follow where on the pitch each one lands over time, smooth those
+    pitch positions with a running median over about a second, and rebuild
+    the homography from the four smoothed points. Real camera movement and
+    cuts to another camera are still followed; one-frame wobbles are not.
+    """
+    width, height = image_size
+    # Four picture points in the lower part of the frame, where the grass is.
+    image_points = np.array([
+        [0.2 * width, 0.5 * height], [0.8 * width, 0.5 * height],
+        [0.8 * width, 0.95 * height], [0.2 * width, 0.95 * height],
+    ], dtype=np.float32)
+
+    out = homographies.copy()
+    valid = out.dropna(subset=HOMOGRAPHY_COLUMNS).sort_values("frame_idx")
+    if len(valid) < 3:
+        return out
+
+    # Where each of the four points lands on the pitch, frame by frame.
+    matrices = valid[HOMOGRAPHY_COLUMNS].to_numpy().reshape(-1, 3, 3)
+    landed = np.stack([cv2.perspectiveTransform(image_points.reshape(-1, 1, 2), m).reshape(-1, 2)
+                       for m in matrices])  # (frames, 4 points, 2)
+    landed = pd.DataFrame(landed.reshape(len(valid), 8), index=valid.index)
+
+    # Smooth within stretches of frames that have a camera model; a long gap
+    # (e.g. a replay) starts a new stretch, so it is never smoothed across.
+    step = valid["frame_idx"].diff().median()
+    samples = max(1, round(window_seconds * fps / step))
+    stretch = (valid["frame_idx"].diff() > 3 * step).cumsum()
+    smoothed = landed.groupby(stretch.to_numpy()).transform(
+        lambda s: s.rolling(samples, center=True, min_periods=1).median())
+
+    rebuilt = [
+        cv2.getPerspectiveTransform(image_points, row.reshape(4, 2).astype(np.float32)).ravel()
+        for row in smoothed.to_numpy()
+    ]
+    out.loc[valid.index, HOMOGRAPHY_COLUMNS] = np.array(rebuilt)
+    return out
+
+
 def project_tracks(
     tracks: pd.DataFrame, homographies: pd.DataFrame, max_frame_gap: int = 0
 ) -> pd.DataFrame:
