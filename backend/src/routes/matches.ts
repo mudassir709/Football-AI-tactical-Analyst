@@ -5,6 +5,7 @@
 //   GET    /api/matches/:id/video    stream the video (supports seeking)
 //   GET    /api/matches/:id/results  full analysis JSON (tracks, heatmaps, formations...)
 //   POST   /api/matches/:id/reanalyse  queue the analysis again (optionally another mode)
+//   POST   /api/matches/:id/cancel     stop an analysis that is queued or running
 //   GET    /api/matches/:id/report   stored LLM coaching report
 //   POST   /api/matches/:id/report   generate (or regenerate) the coaching report
 //   DELETE /api/matches/:id          delete a match and its files
@@ -17,7 +18,14 @@ import { requireAuth } from "../auth.ts";
 import { config } from "../config.ts";
 import { prisma } from "../db.ts";
 import { toPublicMatch } from "../matchView.ts";
-import { ANALYSIS_MODES, enqueueAnalysis, removeQueuedJob, type AnalysisMode } from "../queue.ts";
+import {
+  ANALYSIS_MODES,
+  cancelledState,
+  enqueueAnalysis,
+  removeQueuedJob,
+  requestCancel,
+  type AnalysisMode,
+} from "../queue.ts";
 import { generateCoachingReport, ReportError, reportsEnabled } from "../report.ts";
 import { VIDEO_DIR, absolutePath, isVideoFile, removeFile } from "../storage.ts";
 
@@ -178,11 +186,29 @@ matchesRouter.post("/:id/reanalyse", async (req, res) => {
   res.json({ match: toPublicMatch(updated) });
 });
 
+// Stop an analysis. A queued one is cancelled at once; a running one gets the
+// stage "Cancelling…" and the worker stops within a few seconds, after which
+// the queue events (queue.ts) mark the match as cancelled.
+matchesRouter.post("/:id/cancel", async (req, res) => {
+  const match = await findOwnMatch(req, res);
+  if (!match) return;
+  if (match.status !== "QUEUED" && match.status !== "PROCESSING") {
+    res.status(409).json({ error: "This match is not being analysed" });
+    return;
+  }
+  const outcome = await requestCancel(match.id);
+  const updated = await prisma.match.update({
+    where: { id: match.id },
+    data: outcome === "removed" ? cancelledState(match) : { stage: "Cancelling…" },
+  });
+  res.json({ match: toPublicMatch(updated) });
+});
+
 matchesRouter.delete("/:id", async (req, res) => {
   const match = await findOwnMatch(req, res);
   if (!match) return;
   if (match.status === "PROCESSING") {
-    res.status(409).json({ error: "This match is being analysed; delete it when it finishes" });
+    res.status(409).json({ error: "This match is being analysed; cancel it first, or delete it when it finishes" });
     return;
   }
   await removeQueuedJob(match.id);

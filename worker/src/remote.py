@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+from src.cancel import AnalysisCancelled
+
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[float, str], None]
@@ -53,7 +55,8 @@ def _download(client: httpx.Client, url: str, target: Path) -> None:
 
 
 def _upload_in_chunks(
-    client: httpx.Client, job_id: str, video_path: Path, on_progress: Callable[[float], None]
+    client: httpx.Client, job_id: str, video_path: Path, on_progress: Callable[[float], None],
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> None:
     """Send the video in 50 MB pieces. Each piece says where in the file it
     starts (offset), so a piece that is sent twice is not added twice."""
@@ -61,6 +64,9 @@ def _upload_in_chunks(
     offset = 0
     with video_path.open("rb") as video:
         while chunk := video.read(CHUNK_BYTES):
+            if should_stop():  # the user cancelled during the upload
+                client.delete(f"/jobs/{job_id}")
+                raise AnalysisCancelled()
             for attempt in range(1, CHUNK_ATTEMPTS + 1):
                 try:
                     client.put(
@@ -83,8 +89,13 @@ def run_remote_analysis(
     playback_path: Path,
     progress: ProgressCallback,
     mode: str,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> dict[str, Any]:
-    """Analyse ``video_path`` on the GPU service; returns the pipeline summary."""
+    """Analyse ``video_path`` on the GPU service; returns the pipeline summary.
+
+    ``should_stop`` returns True once the user has cancelled; the GPU service
+    is then told to stop too, and AnalysisCancelled is raised.
+    """
     headers = {"Authorization": f"Bearer {token}"}
     timeout = httpx.Timeout(30.0, read=300.0, write=300.0)
     with httpx.Client(base_url=base_url, headers=headers, timeout=timeout) as client:
@@ -97,7 +108,7 @@ def run_remote_analysis(
                 "/jobs", data={"mode": mode, "filename": video_path.name}
             ).raise_for_status().json()["id"]
             _upload_in_chunks(client, job_id, video_path, lambda share: progress(
-                UPLOAD_END * share, f"Uploading video to {device}"))
+                UPLOAD_END * share, f"Uploading video to {device}"), should_stop)
             client.post(f"/jobs/{job_id}/start").raise_for_status()
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             raise RemoteUnavailable(f"GPU service unavailable: {exc}") from exc
@@ -109,6 +120,13 @@ def run_remote_analysis(
             if time.monotonic() - started > JOB_TIMEOUT_SECONDS:
                 raise RemoteAnalysisError("Remote analysis timed out")
             time.sleep(POLL_SECONDS)
+            if should_stop():
+                # Ask the GPU service to stop; it frees the GPU for the next job.
+                try:
+                    client.post(f"/jobs/{job_id}/cancel")
+                except httpx.HTTPError:
+                    pass  # it also forgets unfinished jobs on its own
+                raise AnalysisCancelled()
             try:
                 status = client.get(f"/jobs/{job_id}").raise_for_status().json()
                 errors = 0
@@ -120,6 +138,8 @@ def run_remote_analysis(
                 continue
             if status["status"] == "failed":
                 raise RemoteAnalysisError(status.get("error") or "Remote analysis failed")
+            if status["status"] == "cancelled":
+                raise AnalysisCancelled()
             scaled = UPLOAD_END + (ANALYSIS_END - UPLOAD_END) * status["percent"] / 100
             progress(scaled, f"{status['stage']} (on {device})")
             if status["status"] == "completed":

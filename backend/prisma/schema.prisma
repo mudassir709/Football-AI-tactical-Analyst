@@ -12,12 +12,14 @@ datasource db {
 }
 
 // Lifecycle of an uploaded match:
-// QUEUED -> PROCESSING -> COMPLETED, or FAILED if the worker hits an error.
+// QUEUED -> PROCESSING -> COMPLETED, or FAILED if the worker hits an error,
+// or CANCELLED if the user stopped it before it finished.
 enum MatchStatus {
   QUEUED
   PROCESSING
   COMPLETED
   FAILED
+  CANCELLED
 }
 
 model User {

@@ -232,3 +232,30 @@ def test_full_analysis_with_live_updates_and_ownership():
     wait_for(owner, match_id, {"COMPLETED", "FAILED"})
     assert owner.delete(f"/api/matches/{match_id}").status_code == 204
     assert owner.get(f"/api/matches/{match_id}").status_code == 404
+
+
+@pytest.mark.skipif(not CLIP.exists(), reason=f"test clip not found: {CLIP}")
+def test_cancelling_a_queued_and_a_running_analysis():
+    client = new_user()
+    # The worker takes one job at a time: the first upload starts running,
+    # the second waits in the queue behind it.
+    running = upload(client, CLIP, title="Cancel while running")
+    queued = upload(client, CLIP, title="Cancel while queued")
+    wait_for(client, running["id"], {"PROCESSING"})
+
+    # A queued analysis is cancelled at once.
+    response = client.post(f"/api/matches/{queued['id']}/cancel")
+    assert response.status_code == 200, response.text
+    assert response.json()["match"]["status"] == "CANCELLED"
+
+    # A running one first shows "Cancelling…"; the worker stops within seconds.
+    response = client.post(f"/api/matches/{running['id']}/cancel")
+    assert response.status_code == 200, response.text
+    started = time.time()
+    stopped = wait_for(client, running["id"], {"CANCELLED", "COMPLETED", "FAILED"})
+    assert stopped["status"] == "CANCELLED" and stopped["stage"] == "Cancelled"
+    assert time.time() - started < 60, "the worker took too long to stop"
+
+    # Cancelled matches can be deleted (and nothing is left running).
+    for match in (running, queued):
+        assert client.delete(f"/api/matches/{match['id']}").status_code == 204

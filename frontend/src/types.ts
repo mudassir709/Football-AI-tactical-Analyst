@@ -8,7 +8,7 @@ export interface User {
   createdAt: string;
 }
 
-export type MatchStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+export type MatchStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
 export type AnalysisMode = "standard" | "quick";
 
 export interface TeamSummary {

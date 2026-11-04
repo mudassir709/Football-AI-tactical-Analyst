@@ -45,6 +45,7 @@ const STATUS_STYLES: Record<MatchStatus, { label: string; style: string }> = {
   PROCESSING: { label: "analysing…", style: "text-accent" },
   COMPLETED: { label: "ready ✓", style: "text-chalk" },
   FAILED: { label: "failed ✗", style: "text-danger" },
+  CANCELLED: { label: "cancelled –", style: "text-dim" },
 };
 
 export function StatusBadge({ status }: { status: MatchStatus }) {

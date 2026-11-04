@@ -1,12 +1,14 @@
 // Tests for uploading and managing matches (/api/matches/...): which files are
-// accepted, that the analysis job is queued, and that users can only ever
-// see and change their own matches.
+// accepted, that the analysis job is queued, that an analysis can be
+// cancelled, and that users can only ever see and change their own matches.
 import { existsSync } from "node:fs";
 import request from "supertest";
-import { Job } from "bullmq";
-import { beforeEach, describe, expect, it } from "vitest";
+import { Job, Worker } from "bullmq";
+import { Redis } from "ioredis";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { config } from "../src/config.ts";
 import { prisma } from "../src/db.ts";
-import { analysisQueue } from "../src/queue.ts";
+import { analysisQueue, cancelKey, cancelledState, QUEUE_NAME } from "../src/queue.ts";
 import { absolutePath } from "../src/storage.ts";
 import { app, fakeMp4, loggedInUser, resetData } from "./helpers.ts";
 
@@ -159,5 +161,55 @@ describe("coaching report", () => {
     const match = await upload(agent);
     const response = await agent.get(`/api/matches/${match.id}/report`).expect(200);
     expect(response.body).toEqual({ report: null, enabled: false });
+  });
+});
+
+describe("cancelling", () => {
+  it("a queued analysis is cancelled at once and its job leaves the queue", async () => {
+    const agent = await loggedInUser();
+    const match = await upload(agent);
+
+    const response = await agent.post(`/api/matches/${match.id}/cancel`).expect(200);
+    expect(response.body.match).toMatchObject({ status: "CANCELLED", stage: "Cancelled" });
+    expect(await Job.fromId(analysisQueue, match.id)).toBeUndefined();
+    // It can be started again later.
+    await agent.post(`/api/matches/${match.id}/reanalyse`).expect(200);
+  });
+
+  it("a running analysis gets a stop note for the worker", async () => {
+    const agent = await loggedInUser();
+    const match = await upload(agent);
+    // Play the worker: take the job and keep it "running" until the test ends.
+    let finish = () => {};
+    const worker = new Worker(QUEUE_NAME, () => new Promise<void>((resolve) => (finish = resolve)), {
+      connection: new Redis(config.redisUrl, { maxRetriesPerRequest: null }),
+    });
+    await vi.waitFor(async () => expect(await (await Job.fromId(analysisQueue, match.id))!.isActive()).toBe(true));
+    await prisma.match.update({ where: { id: match.id }, data: { status: "PROCESSING" } });
+
+    const response = await agent.post(`/api/matches/${match.id}/cancel`).expect(200);
+    expect(response.body.match).toMatchObject({ status: "PROCESSING", stage: "Cancelling…" });
+    const redis = new Redis(config.redisUrl);
+    expect(await redis.get(cancelKey(match.id))).toBe("1"); // the note the Python worker looks for
+
+    finish();
+    await worker.close();
+    redis.disconnect();
+  });
+
+  it("is refused when nothing is being analysed, and invisible to other users", async () => {
+    const owner = await loggedInUser("owner@example.com");
+    const stranger = await loggedInUser("stranger@example.com");
+    const match = await upload(owner);
+    await stranger.post(`/api/matches/${match.id}/cancel`).expect(404);
+
+    await prisma.match.update({ where: { id: match.id }, data: { status: "COMPLETED" } });
+    const response = await owner.post(`/api/matches/${match.id}/cancel`).expect(409);
+    expect(response.body.error).toBe("This match is not being analysed");
+  });
+
+  it("a cancelled re-analysis goes back to the earlier results", () => {
+    expect(cancelledState({ resultPath: "results/abc.json" })).toMatchObject({ status: "COMPLETED" });
+    expect(cancelledState({ resultPath: null })).toMatchObject({ status: "CANCELLED" });
   });
 });

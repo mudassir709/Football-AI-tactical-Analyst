@@ -13,6 +13,7 @@ Endpoints (all except /health need "Authorization: Bearer <token>"):
     POST   /jobs                   create a job (form fields: mode, filename) -> {"id": ...}
     PUT    /jobs/{id}/video        add the next piece of the video (?offset=<bytes so far>)
     POST   /jobs/{id}/start        the whole video has arrived: start the analysis
+    POST   /jobs/{id}/cancel       stop the job (the user cancelled the analysis)
     GET    /jobs/{id}              status, progress and summary
     GET    /jobs/{id}/results      results JSON (when completed)
     GET    /jobs/{id}/playback     browser-playable H.264 video (when completed)
@@ -39,6 +40,7 @@ from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from src import config
+from src.cancel import AnalysisCancelled
 from src.pipeline import _pitch_detector, _player_detector, describe_device, run_analysis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -62,13 +64,14 @@ class JobState:
     mode: str
     folder: Path
     video: Path
-    status: str = "uploading"  # uploading -> queued -> running -> completed | failed
+    status: str = "uploading"  # uploading -> queued -> running -> completed | failed | cancelled
     percent: float = 0.0
     stage: str = "Waiting for the GPU"
     error: str | None = None
     summary: dict[str, Any] | None = None
     finished_at: float | None = None
     created_at: float = 0.0
+    cancel_requested: bool = False  # set by POST /jobs/{id}/cancel
 
     def public(self) -> dict[str, Any]:
         return {
@@ -129,14 +132,25 @@ def purge_old_jobs() -> None:
 
 def run_job(job: JobState, video: Path) -> None:
     def on_progress(percent: float, stage: str) -> None:
+        # The analysis reports progress all the time, so this is where a
+        # cancelled job stops.
+        if job.cancel_requested:
+            raise AnalysisCancelled()
         job.percent, job.stage = percent, stage
 
+    if job.cancel_requested:  # cancelled while waiting for the GPU
+        job.status, job.stage, job.finished_at = "cancelled", "Cancelled", time.time()
+        video.unlink(missing_ok=True)
+        return
     job.status = "running"
     try:
         job.summary = run_analysis(
             video, job.folder / "results.json", job.folder / "playback.mp4", on_progress, job.mode
         )
         job.status, job.percent, job.stage = "completed", 100.0, "Done"
+    except AnalysisCancelled:
+        logger.info("Job %s cancelled", job.id)
+        job.status, job.stage = "cancelled", "Cancelled"
     except Exception as exc:  # report any failure to the client instead of crashing
         logger.exception("Job %s failed", job.id)
         job.status, job.stage, job.error = "failed", "Failed", f"{type(exc).__name__}: {exc}"
@@ -209,6 +223,16 @@ def start_job(job_id: str) -> dict[str, str]:
     executor.submit(run_job, job, job.video)
     logger.info("Job %s queued (%s mode, %.1f MB)", job.id, job.mode, job.video.stat().st_size / 1e6)
     return {"id": job.id}
+
+
+@app.post("/jobs/{job_id}/cancel", dependencies=[Depends(require_token)])
+def cancel_job(job_id: str) -> dict[str, str]:
+    """Stop a job: at once if it hasn't started, otherwise at its next progress update."""
+    job = get_job(job_id)
+    job.cancel_requested = True
+    if job.status == "uploading":  # never started
+        job.status, job.stage, job.finished_at = "cancelled", "Cancelled", time.time()
+    return {"status": job.status}
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(require_token)])

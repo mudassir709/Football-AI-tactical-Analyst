@@ -43,6 +43,7 @@ export const api = {
   generateReport: (id: string) => post<{ report: string; enabled: boolean }>(`/matches/${id}/report`),
   reanalyse: (id: string, mode?: AnalysisMode) =>
     post<{ match: Match }>(`/matches/${id}/reanalyse`, mode ? { mode } : {}),
+  cancelAnalysis: (id: string) => post<{ match: Match }>(`/matches/${id}/cancel`),
   getResults: <T>(id: string) => request<T>(`/matches/${id}/results`),
   videoUrl: (id: string) => `/api/matches/${id}/video`,
 };

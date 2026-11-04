@@ -1,6 +1,7 @@
 // The page of one match (/matches/:id). What it shows depends on the status:
 //   - Queued / Analysing: a progress bar that updates live
 //   - Failed: the reason
+//   - Cancelled: a note, and the Re-analyse button to start again
 //   - Ready: the video analysis, with the summary and the AI report in tabs
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -22,6 +23,7 @@ export function MatchPage() {
   const [loaded, setLoaded] = useState<{ completedAt: string; results: AnalysisResults } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reanalysing, setReanalysing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   // Load the match when the page opens (or when we move to another match).
   useEffect(() => {
@@ -62,6 +64,22 @@ export function MatchPage() {
     }
   }
 
+  // "Cancel" button: after a confirmation, ask the server to stop the
+  // analysis. A queued one stops at once; a running one shows "Cancelling…"
+  // until the worker has stopped (a few seconds), then the page updates live.
+  async function cancel() {
+    if (!match) return;
+    if (!window.confirm("Cancel this analysis? You can start it again later with Re-analyse.")) return;
+    setCancelling(true);
+    try {
+      setMatch((await api.cancelAnalysis(match.id)).match);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (error) return <ErrorMessage>{error}</ErrorMessage>;
   if (!match) return <Spinner label="Loading match" />;
   // "busy" = waiting in the queue or being analysed right now.
@@ -98,14 +116,25 @@ export function MatchPage() {
         <div className="space-y-4 border border-dashed border-line bg-pitch-2 p-6">
           <p className="font-hand text-2xl text-accent">Analysing the match…</p>
           <ProgressBar value={match.progress} label={match.stage} />
-          <p className="text-xs text-dim">
-            This page updates live. You can leave it; the analysis keeps running on the server.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-dim">
+              This page updates live. You can leave it; the analysis keeps running on the server.
+            </p>
+            <Button variant="danger" onClick={cancel} disabled={cancelling || match.stage === "Cancelling…"}>
+              {cancelling || match.stage === "Cancelling…" ? "Cancelling…" : "Cancel analysis"}
+            </Button>
+          </div>
         </div>
       )}
 
       {match.status === "FAILED" && (
         <ErrorMessage>Analysis failed: {match.errorMessage ?? "unknown error"}</ErrorMessage>
+      )}
+
+      {match.status === "CANCELLED" && (
+        <p className="border border-dashed border-line p-6 text-sm text-dim">
+          The analysis was cancelled. Press <span className="text-chalk">Re-analyse</span> to start it again.
+        </p>
       )}
 
       {/* The finished analysis. The summary and the AI report are handed to
