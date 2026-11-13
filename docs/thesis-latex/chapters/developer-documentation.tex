@@ -1,9 +1,7 @@
 \chapter{Developer documentation}
 \label{ch:developer}
 
-This chapter documents the design and implementation of Tactical Eye for developers who want to understand, maintain or extend it. It starts with the requirements, then covers the architecture and deployment, the data model and the analysis algorithms, describes each service module by module with the inputs, outputs and behaviour of its important functions, and ends with security and the main implementation decisions. Testing follows in \autoref{ch:testing}.
-
-The source code has one folder per service: \texttt{frontend/} (React dashboard), \texttt{backend/} (Node.js API) and \texttt{worker/} (Python AI worker). Next to them are \texttt{docker-compose.\allowbreak{}yml}, the CI/CD workflow in \texttt{.\allowbreak{}github/workflows/}, the system tests in \texttt{tests/system/} and the accuracy check in \texttt{tests/accuracy/}.
+This chapter describes the design and implementation of Tactical Eye for developers who want to maintain or extend it. The source code has one folder per service: \texttt{frontend/} (React dashboard), \texttt{backend/} (Node.js API) and \texttt{worker/} (Python AI worker), next to \texttt{docker-compose.\allowbreak{}yml}, the CI/CD workflow and the tests.
 
 \input{chapters/dev-architecture}
 \input{chapters/dev-pipeline}

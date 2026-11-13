@@ -56,6 +56,8 @@
 
 % Figures are looked up in these folders
 \graphicspath{{images/}{figures/}{screenshots/}}
+% Slightly taller table rows so tables are easier to read
+\renewcommand{\arraystretch}{1.25}
 
 \begin{document}
 \documentlang{english}
@@ -99,16 +101,6 @@
 \phantomsection
 \addcontentsline{toc}{chapter}{\lsttablelabel}
 \listoftables
-\cleardoublepage
-
-\phantomsection
-\addcontentsline{toc}{chapter}{\lstalgorithmlabel}
-\listofalgorithms
-\cleardoublepage
-
-\phantomsection
-\addcontentsline{toc}{chapter}{\lstcodelabel}
-\lstlistoflistings
 \cleardoublepage
 
 \end{document}

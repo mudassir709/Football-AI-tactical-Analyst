@@ -1,44 +1,40 @@
 \section{Security}
 
-\begin{longtable}{|p{0.26\textwidth}|p{0.66\textwidth}|}
-	\hline
-	\textbf{Threat} & \textbf{Measure} \\
-	\hline
-	\endhead
-	Stolen password database & Passwords are hashed with bcrypt, cost factor 12, with a salt per password~\cite{owasp}. \\
-	\hline
-	Session theft by injected scripts (XSS) & The session token lives in an HTTP-only cookie that page scripts cannot read. React escapes all rendered text, and the Markdown report is rendered without raw HTML. \\
-	\hline
-	Cross-site request forgery & The cookie uses \texttt{SameSite=Lax}; CORS only allows the dashboard's own origin. \\
-	\hline
-	Session interception & \texttt{Secure} cookies (HTTPS only) by default in production, switchable for local demonstrations over HTTP. \\
-	\hline
-	Account enumeration & Log-in gives the same message for an unknown e-mail address and a wrong password; other users' matches answer 404, not 403. \\
-	\hline
-	Access to other users' data & Every match query filters by the owner; cancelling, re-analysing and deleting go through the same check; WebSocket updates go only to the owner's private room, and the socket handshake uses the same cookie. \\
-	\hline
-	Malicious uploads & Extension, MIME type and file signature are checked; files get random names; the size is limited; uploads are streamed to disk. \\
-	\hline
-	Path traversal & All stored paths are resolved and must stay inside the storage folder, in the API and in the worker. \\
-	\hline
-	Invalid input & All request bodies and the configuration are validated with Zod. \\
-	\hline
-	Leaked secrets & Secrets live only in \texttt{.\allowbreak{}env}, which Git ignores; the GPU service needs a token of at least 16 characters; only statistics are sent to the language model. \\
-	\hline
+\autoref{tab:security} lists the threats I considered and how the platform answers each.
+
+\begin{table}[htbp]
+	\centering
+	\begin{tabular}{|p{0.28\textwidth}|p{0.62\textwidth}|}
+		\hline
+		\textbf{Threat} & \textbf{Measure} \\
+		\hline
+		Stolen password database & Passwords are stored only as bcrypt hashes with a salt per password~\cite{owasp}. \\
+		\hline
+		Session theft by injected scripts & The session token lives in an HTTP-only cookie that page scripts cannot read; React escapes all rendered text. \\
+		\hline
+		Forged requests from other sites & The cookie uses \texttt{SameSite=Lax}, and only the dashboard's own origin is allowed. \\
+		\hline
+		Access to other users' data & Every match query filters by the owner; other users' matches answer ``not found'', so their IDs cannot be probed. \\
+		\hline
+		Malicious uploads & Extension, type and the file's first bytes are checked; files get random names and a size limit. \\
+		\hline
+		Paths outside the storage & Every stored path is resolved and must stay inside the storage folder. \\
+		\hline
+		Invalid input & All request bodies and settings are validated with Zod. \\
+		\hline
+		Leaked secrets & Secrets live only in \texttt{.env}, which Git ignores; the language model receives statistics only. \\
+		\hline
+	\end{tabular}
 	\caption{Security measures}
 	\label{tab:security}
-\end{longtable}
+\end{table}
 
-\section{Implementation decisions and code quality}
+\section{Implementation decisions}
 
-Most decisions are explained where they occur. A few apply to the whole code base.
+The code is typed throughout: TypeScript in strict mode for the dashboard and the API, type hints and dataclasses in the worker, and a database client generated from the schema. When the results format changed, the compiler pointed to every place in the dashboard that read it.
 
-The code is typed throughout. The API is checked in TypeScript's strict mode, the frontend additionally rejects unused variables and fall-through \texttt{switch} cases, and the worker uses Python type hints and dataclasses such as \texttt{Homography}, \texttt{TeamAssignment} and \texttt{FormationResult}. Database access is typed because Prisma generates the client from the schema, and the shape of the results file is described once in \texttt{analysis/types.\allowbreak{}ts}. When the results format went from version 2 to 3, the compiler pointed to every place in the dashboard that read a person row. The Python figure script for this thesis had no such check: it unpacked the row from the end, silently took the new position index for a coordinate, and I only noticed when the formation figure came out with a cost twice as high as before.
+Memory stays flat because data is streamed: video frames are read in batches, uploads go straight to disk, the GPU upload goes in pieces and the video player loads with range requests. A full half peaked at 3.6--4.4\,GB of RAM. Tracking data is processed with pandas and NumPy operations on whole columns instead of Python loops; a half has about 840,000 detections, and the steps after the pitch mapping take under 3 minutes together.
 
-Data is validated where it enters the system (requests, configuration, uploaded files, queue results), and inside, the code relies on the types. In the worker, tracking data is processed with pandas and NumPy operations on whole columns rather than Python loops: the projection of all foot points (\autoref{code:projection}), the per-track speeds with grouped differences, and the nearest-homography join. On a full half the tracks table has about 840,000 person rows, where a Python loop per row would have taken minutes for each of these steps; the team assignment, tactics and saving after the pitch mapping take under 3 minutes together. Where loops remain, as in \texttt{select\_\allowbreak{}ball}, they run once per frame, not per row.
+Every threshold of the pipeline is a named constant in \texttt{config.py} with a comment explaining its value and, where it was measured, on what data, so an experiment changes one line. Comments explain why rather than what. Generic code is shared: one drawing function serves the board and the player tab, one statistics function works per track or per position, and the same \texttt{run\_\allowbreak{}analysis()} runs locally and on the GPU.
 
-Streaming instead of loading keeps memory flat. Videos are read as generators of frame batches, uploads are streamed to disk, the GPU upload goes in pieces, and playback uses HTTP Range requests. The peak memory of a full-half analysis was 3.6--4.4\,GB, most of it the two neural networks and the tables of tracks.
-
-Every threshold of the pipeline is a named constant in \texttt{config.\allowbreak{}py} with a comment that explains its value and, where it was measured, on what data; \texttt{REFEREE\_\allowbreak{}COLOUR\_\allowbreak{}RATIO}, for example, records that it was chosen on the first half of the Barcelona--Real Madrid match. Comments in general explain \emph{why} rather than \emph{what}, such as why the ball is not given to ByteTrack or why the camera model is smoothed in pitch coordinates. Generic pieces are shared: \texttt{drawBoard} draws both the main board and the small pitch of the \emph{Player} tab, one \texttt{heatmap()} serves teams, positions and the ball, \texttt{player\_\allowbreak{}stats} works per track or per position, and the same \texttt{run\_\allowbreak{}analysis()} runs locally and on the GPU.
-
-Finally, partial failures are expected rather than exceptional. Jobs are retried with a back-off, results are written atomically, non-finite numbers are caught before they reach JSON, the GPU falls back to local analysis, events of deleted matches are dropped, a cancelled job leaves no half-written playback copy behind, and a job handed out twice is not analysed twice.
+Errors are expected rather than exceptional: jobs are retried, results are written atomically, values that JSON cannot store are replaced before writing, the GPU falls back to local analysis, and a cancelled job leaves no half-written files behind.

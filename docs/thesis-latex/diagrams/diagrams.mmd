@@ -24,29 +24,17 @@ flowchart TB
 
 %% ==== deployment
 flowchart TB
-  USER(["User's browser"]) -->|"http://localhost:8080"| FE
-  subgraph Host["Docker host: docker compose --profile app"]
-    FE["frontend<br/>nginx:1.27-alpine<br/>port 8080 → 80"]
-    BE["backend<br/>node:24-alpine<br/>port 4000"]
-    WK["worker<br/>python:3.12-slim<br/>CPU PyTorch"]
-    PG[("postgres:17-alpine<br/>port 5432")]
-    RD[("redis:7.4-alpine<br/>port 6379")]
-    VOL[["./storage volume"]]
-    MOD[["./worker/models (read-only)"]]
+  USER(["Browser"]) -->|"port 8080"| FE
+  subgraph Host["Docker host"]
+    FE["frontend<br/>nginx"] --> BE["backend<br/>Node.js API"]
+    BE --> PG[("PostgreSQL")]
+    BE --> RD[("Redis")]
+    WK["worker<br/>Python"] --> RD
+    BE --- ST[["storage folder"]]
+    WK --- ST
   end
-  FE -->|"/api, /socket.io"| BE
-  BE --> PG
-  BE --> RD
-  WK --> RD
-  BE --- VOL
-  WK --- VOL
-  WK --- MOD
-  WK -.->|"HTTPS + token"| GPU["GPU analysis service<br/>FastAPI on RunPod"]
-  BE -.->|HTTPS| AZ["Azure OpenAI"]
-  subgraph CI["GitHub"]
-    GA["GitHub Actions CI/CD"] --> GHCR[("ghcr.io images")]
-  end
-  GHCR -. "docker pull" .-> Host
+  WK -.-> GPU["GPU service<br/>(optional)"]
+  BE -.-> AZ["Azure OpenAI<br/>(optional)"]
 
 %% ==== sequence_upload
 sequenceDiagram
@@ -267,22 +255,32 @@ classDiagram
 
 %% ==== frontend_components
 flowchart TB
-  MAIN["main.tsx<br/>BrowserRouter · AuthProvider"] --> APP["App.tsx (routes)"]
-  APP --> AUTH["AuthPage<br/>login or register"]
-  APP --> LAY["Layout<br/>header · login guard"]
-  LAY --> MS["MatchesPage"] --> MR["MatchRow × n"]
-  LAY --> UPL["UploadPage"] --> STEP["Step × 3"]
-  LAY --> MP["MatchPage<br/>progress · Cancel · Re-analyse"]
-  MP --> VA["VideoAnalysis<br/>video · overlay · full screen · board"]
-  MP --> SP["SummaryPanel"]
+  APP["App (routes)"] --> AUTH["AuthPage<br/>log in / register"]
+  APP --> LAY["Layout<br/>header · log-in guard"]
+  LAY --> MS["MatchesPage"] --> MR["MatchRow"]
+  LAY --> UPL["UploadPage"]
+  LAY --> MP["MatchPage<br/>progress · Cancel"]
+  MP --> VA["VideoAnalysis<br/>video · board · tabs"]
   MP --> CR["CoachingReport"]
-  VA --> LEG["Legend"]
   VA --> PP["PlayerPanel"]
-  VA -.-> TL["analysis/timeline.ts: Timeline"]
-  VA -.-> DR["analysis/draw.ts: drawVideoOverlay, drawBoard"]
-  DR -.-> GE["analysis/geometry.ts"]
-  MS -. "useMatchUpdates" .-> WS(("Socket.IO"))
-  MP -. "useMatchUpdates" .-> WS
-  AUTH -. "api.ts" .-> REST(("REST /api"))
-  UPL -. "api.ts" .-> REST
-  MP -. "api.ts" .-> REST
+  VA -.-> AN["timeline · geometry · draw<br/>(overlay modules)"]
+
+%% ==== sequence_simple
+sequenceDiagram
+  participant B as Browser
+  participant A as API
+  participant Q as Redis queue
+  participant W as AI worker
+  B->>A: upload video (POST /api/matches)
+  A->>Q: add job {matchId, videoPath, mode}
+  A-->>B: 201 match (queued)
+  Q->>W: worker takes the job
+  loop each stage of the pipeline
+    W->>Q: progress {percent, stage}
+    Q-->>A: progress event
+    A-->>B: match:updated (WebSocket)
+  end
+  W->>Q: result {resultPath, summary}
+  Q-->>A: completed event
+  A-->>B: match:updated (completed)
+  B->>A: GET results and video
