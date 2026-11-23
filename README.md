@@ -52,10 +52,21 @@ local processing when the GPU is unavailable.
 
 ## Running it
 
-Requirements: Docker Desktop. Copy `.env.example` to `.env` and fill in the
-secrets, and put the two Roboflow model files into `worker/models/`
-(`football-player-detection.pt`, `football-pitch-detection.pt`; download links
-in `worker/gpu/setup.sh`).
+Requirements: Docker Desktop and Git.
+
+1. Clone the repository:
+   `git clone https://github.com/mudassir709/Football-AI-tactical-Analyst.git`
+2. Download the two model files `football-player-detection.pt` and
+   `football-pitch-detection.pt` from the
+   [models-v1 release](https://github.com/mudassir709/Football-AI-tactical-Analyst/releases/tag/models-v1)
+   and put them into `worker/models/`.
+3. Copy `.env.example` to `.env` and fill it in. Choose your own database
+   password and `JWT_SECRET`. Leave `GPU_SERVER_URL` empty to analyse on your
+   own machine, and leave the `AZURE_OPENAI_*` values empty if you have no
+   Azure OpenAI key (everything works except the AI coaching report).
+4. Start it as shown below, open http://localhost:8080 and create an account.
+   The first build takes a while, and analysis on a CPU is slow, so try a
+   short clip first.
 
 **Everything in containers** (open http://localhost:8080):
 
