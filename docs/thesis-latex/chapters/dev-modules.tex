@@ -1,6 +1,6 @@
 \section{The backend (API)}
 
-The API in \texttt{backend/src/} is an Express 5 application in TypeScript. \texttt{app.ts} builds the application, \texttt{config.ts} validates the settings, \texttt{auth.ts} handles sessions, \texttt{routes/} holds the endpoints, \texttt{queue.ts} the job queue, \texttt{storage.ts} the files and \texttt{report.ts} the coaching report. \autoref{fig:backend-modules} shows which module uses which. Only the two route modules receive requests; they check the session with \texttt{auth.ts} and leave the work to the service modules, and only \texttt{db.ts} and \texttt{queue.ts} talk to the database and Redis.
+The API in \texttt{backend/src/} is an Express 5 application in TypeScript. \texttt{app.ts} builds the application, \texttt{config.ts} validates the settings, \texttt{auth.ts} handles sessions, \texttt{routes/} holds the endpoints, \texttt{queue.ts} the job queue, \texttt{storage.ts} the files and \texttt{report.ts} the coaching report. \autoref{fig:backend-modules} shows which module uses which. Apart from the health check in \texttt{app.ts}, only the two route modules receive requests; they check the session with \texttt{auth.ts} and leave the work to the service modules, and only \texttt{db.ts} and \texttt{queue.ts} talk to the database and Redis.
 
 \begin{figure}[htbp]
 	\centering
