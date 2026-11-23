@@ -35,7 +35,7 @@ The main non-functional requirements follow from the length of the analysis. No 
 
 \autoref{fig:usecase} shows the actors: the registered user, the AI worker as a system actor that drives the analysis, and the operator who deploys the platform.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{usecase}
 	\caption{Use case diagram}
@@ -46,7 +46,7 @@ The main non-functional requirements follow from the length of the analysis. No 
 
 Tactical Eye has three tiers with very different resource needs (\autoref{fig:architecture}). The React single-page application in the browser renders the dashboard and the overlays. The Node.js API handles many short requests (log-in, uploads, lists, video streaming, live updates) and must stay responsive. The Python AI workers run long, CPU- or GPU-bound analyses, one at a time. The API and the workers communicate only through a BullMQ job queue on Redis~\cite{bullmq} and a shared storage folder; only the API uses the PostgreSQL database.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.95\textwidth]{architecture}
 	\caption{Components and communication paths}
@@ -55,7 +55,7 @@ Tactical Eye has three tiers with very different resource needs (\autoref{fig:ar
 
 The central decision was that the API never runs an analysis itself. My first prototype ran the pipeline inside the request handler: a 30-second clip kept the request open for 25 minutes, the browser gave up, and a crash took the API down with it. Now an upload only creates a database row and a queue job and returns at once. Workers pull jobs when they are free, can be added or removed without the API noticing, and jobs survive restarts because Redis stores them. Progress flows back the same way: the worker reports progress to the queue, the API listens to the queue's events, updates the database and pushes the change to the browser over Socket.IO~\cite{socketio} (\autoref{fig:sequence}).
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{sequence_simple}
 	\caption{An upload, its analysis and the live updates}
@@ -172,7 +172,7 @@ Each service is layered. In the dashboard, pages compose reusable components, al
 
 Every service has a Dockerfile, and \texttt{docker-compose.\allowbreak{}yml} connects them (\autoref{fig:deployment}). nginx serves the built dashboard and forwards \texttt{/api} and the WebSocket to the backend, so the browser talks to one address and needs no cross-origin set-up. The backend applies database migrations when it starts. The backend and the worker share the \texttt{storage} folder, and the database stores only paths relative to it. The AI models are mounted into the worker container instead of being copied into the image.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.95\textwidth]{deployment}
 	\caption{Deployment of the containers}
@@ -181,9 +181,9 @@ Every service has a Dockerfile, and \texttt{docker-compose.\allowbreak{}yml} con
 
 The GitHub Actions workflow runs on every push (\autoref{fig:cicd}). The backend, frontend and worker jobs type-check, lint and run their unit and API tests in parallel. If they pass, the system job starts the whole platform in Docker and runs the system tests against it, and only then are the Docker images built and, on the main branch, published. A published image has therefore passed every test level.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=0.8\textwidth]{cicd}
+	\includegraphics[width=0.6\textwidth]{cicd}
 	\caption{The CI/CD pipeline}
 	\label{fig:cicd}
 \end{figure}

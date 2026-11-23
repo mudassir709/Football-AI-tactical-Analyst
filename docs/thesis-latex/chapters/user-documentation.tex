@@ -11,7 +11,7 @@ Tactical Eye turns football video from a broadcast-style camera (the wide view t
 
 The intended users are coaches, analysts and scouts of amateur and youth clubs, students of the game, and anyone with match video but no access to commercial tracking data. The dashboard runs in a web browser and needs no technical knowledge. \autoref{tab:user-levels} lists the user levels; there is no administrator role, because every user only manages their own matches.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.2\textwidth}|p{0.72\textwidth}|}
 		\hline
@@ -30,7 +30,7 @@ The intended users are coaches, analysts and scouts of amateur and youth clubs, 
 
 \section{System requirements}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.17\textwidth}|p{0.36\textwidth}|p{0.38\textwidth}|}
 		\hline
@@ -81,7 +81,7 @@ The first start takes several minutes while Docker builds the images; later star
 
 \paragraph{Where the models come from.} I did not train the two models myself. They are published with Roboflow's open-source \texttt{sports} repository~\cite{roboflowsports}, whose set-up script downloads them from the Google Drive links above. Roboflow trained them with Ultralytics YOLOv8~\cite{yolov8} on datasets it built from the footage of the DFL Bundesliga Data Shootout~\cite{dfl}; it does not say which dataset each file was trained on. The code of the \texttt{sports} repository is under the MIT licence, and Ultralytics states that every model trained with YOLOv8 falls under the AGPL-3.0 licence~\cite{ultralyticslicense}, so the model files carry that licence. Because files on a personal Google Drive can disappear, I attached copies to the project's GitHub release, with checksums to verify them.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.38\textwidth}|p{0.53\textwidth}|}
 		\hline
@@ -112,7 +112,7 @@ The first start takes several minutes while Docker builds the images; later star
 
 Opening the dashboard shows the log-in page (\autoref{fig:auth}). A new user clicks \emph{Create an account} and enters a name, an e-mail address and a password of at least 8 characters. A wrong password shows \emph{Invalid email or password} (\autoref{fig:login-error}), without revealing whether the address is registered. A session lasts seven days. Every page then has the same header with \emph{Matches}, \emph{Upload}, the user's name and \emph{Log out}.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\begin{subfigure}{0.49\textwidth}
 		\includegraphics[width=\textwidth]{01_login}
@@ -127,7 +127,7 @@ Opening the dashboard shows the log-in page (\autoref{fig:auth}). A new user cli
 	\label{fig:auth}
 \end{figure}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\textwidth]{02_login_error}
 	\caption{A failed log-in attempt}
@@ -140,14 +140,14 @@ The dashboard is a single-page application, so moving between pages does not rel
 
 The \emph{Matches} page (\autoref{fig:matches}) lists the user's uploads, newest first, with the title, date, file size, mode and a short status label such as \emph{analysing\dots} or \emph{ready}, shown in a handwriting-style font (\autoref{tab:status}). Finished matches also show each team's kit colour and main formation. The list updates by itself while analyses run, because the server pushes every change to the browser.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{04_matches}
 	\caption{The match list with two analysed halves and the five demo clips}
 	\label{fig:matches}
 \end{figure}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.17\textwidth}|p{0.70\textwidth}|}
 		\hline
@@ -172,14 +172,14 @@ The \emph{Matches} page (\autoref{fig:matches}) lists the user's uploads, newest
 
 The upload page (\autoref{fig:upload}) has three steps: choose the video by clicking or dragging it onto the dashed area (MP4, MOV, M4V, MKV, WebM or AVI, any codec, up to 1\,GB), give it a title, and pick the analysis mode (\autoref{tab:modes}). \emph{Upload and analyse} sends the file with a progress bar and then opens the match page. A file that is not really a video, for example a renamed text file, is rejected with \emph{The file is not a valid video} and nothing is stored (\autoref{fig:upload-invalid}). Footage from the main wide camera gives the best results; replays and close-ups are skipped.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{07_upload_ready}
 	\caption{The upload page with a video chosen and Quick mode selected}
 	\label{fig:upload}
 \end{figure}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.13\textwidth}|p{0.38\textwidth}|p{0.39\textwidth}|}
 		\hline
@@ -194,7 +194,7 @@ The upload page (\autoref{fig:upload}) has three steps: choose the video by clic
 	\label{tab:modes}
 \end{table}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{06_upload_invalid_file}
 	\caption{A file that is not a video is rejected}
@@ -205,21 +205,21 @@ The upload page (\autoref{fig:upload}) has three steps: choose the video by clic
 
 While a video is analysed, its page shows a progress bar with the current step (\autoref{fig:in-progress}): preparing the video, detecting and tracking players, mapping positions to the pitch, assigning teams, analysing tactics and saving. The page updates live; the user can leave it, close the browser or upload more matches, and the analysis continues on the server. The match list shows the same progress in the match's row (\autoref{fig:list-progress}), and \autoref{tab:steps} explains the steps. If a step fails, the worker tries the whole analysis once more after 10 seconds, and the bar shows \emph{Retrying after an error} in the meantime.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{08_match_in_progress}
 	\caption{An analysis in progress, with the \emph{Cancel analysis} button}
 	\label{fig:in-progress}
 \end{figure}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{09_matches_live_progress}
 	\caption{Live progress on the match list}
 	\label{fig:list-progress}
 \end{figure}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.31\textwidth}|p{0.13\textwidth}|p{0.46\textwidth}|}
 		\hline
@@ -244,9 +244,9 @@ While a video is analysed, its page shows a progress bar with the current step (
 
 \emph{Cancel analysis} stops an analysis that was started by mistake, for example with the wrong video or in the wrong mode. After a confirmation, a queued analysis is cancelled at once; a running one shows \emph{Cancelling\dots} and stops within a few seconds, also on the cloud GPU. The match then shows the note in \autoref{fig:cancelled} and can be started again with \emph{Re-analyse}. Cancelling a re-analysis of a finished match loses nothing: the match goes back to its earlier results.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=\textwidth]{10_match_cancelled}
+	\includegraphics[width=0.9\textwidth]{10_match_cancelled}
 	\caption{A cancelled analysis}
 	\label{fig:cancelled}
 \end{figure}
@@ -255,7 +255,7 @@ While a video is analysed, its page shows a progress bar with the current step (
 
 A finished match shows the video with its drawings and controls on the left and the tactical board with both teams' current formations on the right (\autoref{fig:intro-analysis}). Under the video are the controls (\autoref{tab:controls}) and the layer buttons (\autoref{tab:layers}); further down, three tabs show the summary, the selected player and the AI report. The drawings stay on the players in every frame, also while the camera pans and zooms.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.25\textwidth}|p{0.66\textwidth}|}
 		\hline
@@ -274,7 +274,7 @@ A finished match shows the video with its drawings and controls on the left and 
 	\label{tab:controls}
 \end{table}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{22_full_screen}
 	\caption{Full-screen mode}
@@ -283,14 +283,14 @@ A finished match shows the video with its drawings and controls on the left and 
 
 The layer buttons (\autoref{fig:layers}) switch the drawings on the video and on the board on and off; a filled dot means the layer is visible.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.9\textwidth]{16_layer_controls}
 	\caption{The layer buttons}
 	\label{fig:layers}
 \end{figure}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.2\textwidth}|p{0.71\textwidth}|}
 		\hline
@@ -311,21 +311,21 @@ The layer buttons (\autoref{fig:layers}) switch the drawings on the video and on
 	\label{tab:layers}
 \end{table}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{12_overlay_players_paths}
 	\caption{Position labels and movement paths drawn on the video; the referees are labelled REF}
 	\label{fig:overlays}
 \end{figure}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{13_overlay_team_shape}
 	\caption{The team shape layer}
 	\label{fig:shape}
 \end{figure}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\begin{subfigure}{0.49\textwidth}
 		\includegraphics[width=\textwidth]{14_overlay_heatmap_team_a}
@@ -342,7 +342,7 @@ The layer buttons (\autoref{fig:layers}) switch the drawings on the video and on
 
 The tactical board (\autoref{fig:board}) shows the same moment from above on a to-scale $105 \times 68$\,m pitch: Team A as circles, Team B as crosses, referees as small yellow squares and the ball as a white dot. Unlike the video, it shows true proportions, so distances and spacing are easy to judge. Under the board, two cards show the formation each team plays at that moment and the runner-up; a close runner-up means the team's shape lies between two formations.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.7\textwidth]{18_board_and_formations}
 	\caption{The tactical board with the current formations and the legend}
@@ -351,7 +351,7 @@ The tactical board (\autoref{fig:board}) shows the same moment from above on a t
 
 Clicking a player on the video or the board opens the \emph{Player} tab for their position (\autoref{fig:player-panel}): its heatmap and path over the whole video, the distance covered, the time visible, and the average and top speed. These numbers belong to the position, not to one named player, because a single camera cannot follow the same player through a whole match.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{19_player_panel}
 	\caption{The \emph{Player} tab of Team A's left midfielder over a full half}
@@ -360,14 +360,14 @@ Clicking a player on the video or the board opens the \emph{Player} tab for thei
 
 The \emph{Summary} tab (\autoref{fig:summary}) compares the two teams with the metrics in \autoref{tab:summary-metrics}, and adds the length of the video, the frames analysed, how often the ball was found and the number of formation changes.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{20_summary}
 	\caption{The summary of the first half}
 	\label{fig:summary}
 \end{figure}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.22\textwidth}|p{0.68\textwidth}|}
 		\hline
@@ -390,9 +390,9 @@ The \emph{Summary} tab (\autoref{fig:summary}) compares the two teams with the m
 
 The \emph{AI coaching report} tab writes a short report with \emph{Generate report} in about 10--30 seconds (\autoref{fig:report}). It names the teams by kit colour and the players by position, is based only on the measured numbers, and is stored with the match.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=0.85\textwidth]{21_coaching_report}
+	\includegraphics[width=0.62\textwidth]{21_coaching_report}
 	\caption{The AI coaching report of a full half}
 	\label{fig:report}
 \end{figure}
@@ -401,7 +401,7 @@ The \emph{AI coaching report} tab writes a short report with \emph{Generate repo
 
 \emph{Re-analyse} on the match page queues the stored video again, for example after a failure or a cancellation; the previous results stay visible until the new ones are ready. \emph{Delete} in a match's row removes the match and all its files after a \emph{Delete? Yes / No} confirmation (\autoref{fig:delete}). A running analysis must be cancelled before its match can be deleted; a match waiting in the queue can be deleted, and its job is removed from the queue.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{24_matches_failed_and_delete_confirm}
 	\caption{A failed analysis and the delete confirmation}
@@ -413,9 +413,9 @@ The \emph{AI coaching report} tab writes a short report with \emph{Generate repo
 
 Errors appear in red next to the action that caused them, or on the row and page of the affected match (\autoref{fig:failed}). \autoref{tab:errors} lists the error messages and what to do about them.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=\textwidth]{23_match_failed}
+	\includegraphics[width=0.85\textwidth]{23_match_failed}
 	\caption{The page of a match whose analysis failed}
 	\label{fig:failed}
 \end{figure}
@@ -463,7 +463,7 @@ Errors appear in red next to the action that caused them, or on the row and page
 
 Besides errors, the dashboard shows the information messages in \autoref{tab:info-messages}.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.50\textwidth}|p{0.40\textwidth}|}
 		\hline

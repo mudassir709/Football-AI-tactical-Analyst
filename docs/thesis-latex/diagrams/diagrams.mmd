@@ -131,42 +131,30 @@ stateDiagram-v2
 
 %% ==== pipeline
 flowchart LR
-  subgraph S1["Video, detection and pitch"]
+  subgraph S1[" "]
     direction TB
-    V[/"Uploaded video<br/>any codec, 25 or 50 fps"/] --> T["0 · H.264 playback copy · 0–5 %<br/>PyAV / libx264<br/>the analysis reads this copy"]
-    T --> DT["1 · Detection + tracking · 5–60 %<br/>YOLOv8x · stride scaled to 25 fps<br/>ByteTrack IDs · up to 5 ball candidates"]
-    DT --> KP["2 · Pitch keypoints · 60–88 %<br/>YOLOv8-pose, 32 landmarks<br/>RANSAC homography"]
-    KP --> HS["Camera model<br/>smoothed over 1.5 s"]
-    HS --> P["Project feet → pitch metres<br/>(105 × 68 m)"]
+    V[/"Uploaded video"/] --> T["Playback copy<br/>for the browser"]
+    T --> D["Detection, tracking<br/>people and ball"]
+    D --> H["Image to pitch<br/>positions in metres"]
   end
-  subgraph S2["Clean-up, teams and tactics"]
+  subgraph S2[" "]
     direction TB
-    C["Clean-up<br/>people off the pitch · real ball"] --> TA["3 · Teams · 88–93 %<br/>shirt colour vs local grass · K-Means<br/>referees by kit · goalkeepers by position"]
-    TA --> ST["4 · Tactics · 93–98 %<br/>join tracks · smoothing · ball gaps"]
-    ST --> F["Formations<br/>Hungarian matching · 20 s stability"]
-    F --> POS["Position labels<br/>slots of the main formation"]
-    ST --> M["Metrics<br/>shape · distance · speed · heatmaps"]
-    POS --> R[/"5 · results JSON v3 · 98–100 %"/]
-    M --> R
+    C["Clean-up<br/>off-pitch people,<br/>false balls"] --> TE["Teams, referees<br/>by shirt colour"]
+    TE --> F["Positions, formations<br/>labels such as LB, ST"]
+    F --> M["Metrics<br/>shape, distance, speed"]
+    M --> R[/"Results file"/]
   end
   S1 --> S2
 
 %% ==== navigation
-flowchart TB
-  L["/login<br/>Log in"] <-->|link| RG["/register<br/>Create account"]
-  L -->|success| M
+flowchart LR
+  L["Log in"] <-->|link| RG["Create account"]
+  L -->|success| M["Match list"]
   RG -->|success| M
-  subgraph APP["Protected area: header with Matches · Upload · Log out"]
-    M["/<br/>Matches list<br/>live progress rows"]
-    UP["/upload<br/>Upload a match"]
-    MP["/matches/:id<br/>Analysis page"]
-  end
-  M -->|"Upload a match"| UP
-  UP -->|"upload finished"| MP
-  M -->|"open a match"| MP
-  MP -->|"← all matches"| M
-  APP -->|"Log out / not logged in"| L
-  X["any other URL"] --> M
+  M -->|Upload| UP["Upload a match"]
+  UP -->|upload finished| MP["Analysis page"]
+  M <-->|open / back| MP
+  M -->|Log out| L
 
 %% ==== cicd
 flowchart TB

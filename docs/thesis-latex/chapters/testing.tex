@@ -9,7 +9,7 @@ In the first version only the worker had automated tests, and the system tests w
 
 The worker's tests run with pytest in about 10 seconds and need no videos or models: a known camera matrix projects landmarks into a synthetic image, a red or lime shirt is painted on grass, a player runs in a straight line. Most of the newer tests are regression tests, each reproducing a defect found on real footage. \autoref{tab:worker-tests} groups them by file.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.22\textwidth}|p{0.05\textwidth}|p{0.63\textwidth}|}
 		\hline
@@ -38,7 +38,7 @@ The dashboard's 23 Vitest tests cover the pure overlay modules: projecting pitch
 
 The 42 backend tests use Vitest~\cite{vitest} and SuperTest~\cite{supertest}. I decided against mocking the database, because most bugs I had found in the API were in how the routes, the database and the queue work together. The tests use their own PostgreSQL database and Redis database, so they never touch real data or reach the real worker. \autoref{tab:api-tests} summarises them.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.22\textwidth}|p{0.68\textwidth}|}
 		\hline
@@ -63,7 +63,7 @@ The 42 backend tests use Vitest~\cite{vitest} and SuperTest~\cite{supertest}. I 
 
 The system tests run against the whole platform in Docker, through nginx, using HTTP and the WebSocket like a browser; nothing is mocked. They take about 11 minutes locally, mostly a real analysis on the CPU.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.30\textwidth}|p{0.60\textwidth}|}
 		\hline
@@ -91,7 +91,7 @@ The system tests run against the whole platform in Docker, through nginx, using 
 
 To measure correctness, I annotated 20 frames by hand, four from each demo clip, with a small annotation page I wrote: every person's feet with their team or role, the ball, and visible pitch landmarks, 466 people in total. A script pairs the clicked feet with the detected ones (within 35 pixels) using the Hungarian algorithm and compares teams, roles, the ball and positions in metres (\autoref{tab:accuracy}).
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.55\textwidth}|p{0.25\textwidth}|}
 		\hline
@@ -121,7 +121,7 @@ The five 30-second Bundesliga clips~\cite{dfl} each took 36--40 seconds on an NV
 
 My supervisor asked for at least one long video, and I analysed two complete halves in Standard mode on an L4 (\autoref{tab:long-videos}, \autoref{fig:long-stages}).
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.34\textwidth}|p{0.26\textwidth}|p{0.26\textwidth}|}
 		\hline
@@ -144,7 +144,7 @@ My supervisor asked for at least one long video, and I analysed two complete hal
 	\label{tab:long-videos}
 \end{table}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{long_video_stages}
 	\caption{Processing time of the two halves per stage}
@@ -157,7 +157,7 @@ More valuable than the numbers was what the halves revealed. The sideline people
 
 \section{Efficiency}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.32\textwidth}|p{0.25\textwidth}|p{0.25\textwidth}|}
 		\hline
@@ -176,7 +176,7 @@ More valuable than the numbers was what the halves revealed. The sideline people
 
 The two neural networks dominate the processing time, so the GPU is about 37 times faster than my laptop's CPU (\autoref{tab:times}). The laptop's own small GPU was even slower than its CPU, which is why the worker uses the CPU by default and heavy work goes to a rented GPU (\autoref{fig:performance}).
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.9\textwidth]{performance}
 	\caption{Processing time of the clips on the laptop CPU and on the cloud GPU (logarithmic scale)}
@@ -191,7 +191,7 @@ Workers share nothing but the queue and the storage, and the queue gives each jo
 
 I measured this on the laptop. Four copies of the 3-second test clip were uploaded at once in Quick mode, once with one worker and once with two (\autoref{tab:throughput}). With two workers, both jobs ran side by side as intended, but each took about twice as long: the four jobs finished only 9\,\% sooner, and throughput rose by 10\,\%. Both workers share the same 12 processor threads. The worker sets no thread limit, so PyTorch uses as many threads as it finds, and during the two-worker run each worker peaked at about 630\,\% CPU, roughly half of the machine; a second worker on the same laptop therefore mostly takes turns with the first. Memory peaked at 4.4\,GB of the 5.8\,GB available to Docker. More workers therefore pay off only on separate machines or GPUs, which I could not test. A first two-worker run, which overlapped with the LaTeX build of this thesis, was even slower (777\,s) and is not counted.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.22\textwidth}|p{0.2\textwidth}|p{0.2\textwidth}|p{0.22\textwidth}|}
 		\hline
@@ -212,7 +212,7 @@ Processing time and the results file grow linearly with the length of the video:
 
 \section{Lessons learnt}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.45\textwidth}|p{0.45\textwidth}|}
 		\hline

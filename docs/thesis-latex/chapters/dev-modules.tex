@@ -2,7 +2,7 @@
 
 The API in \texttt{backend/src/} is an Express 5 application in TypeScript. \texttt{app.ts} builds the application, \texttt{config.ts} validates the settings, \texttt{auth.ts} handles sessions, \texttt{routes/} holds the endpoints, \texttt{queue.ts} the job queue, \texttt{storage.ts} the files and \texttt{report.ts} the coaching report. \autoref{fig:backend-modules} shows which module uses which. Apart from the health check in \texttt{app.ts}, only the two route modules receive requests; they check the session with \texttt{auth.ts} and leave the work to the service modules, and only \texttt{db.ts} and \texttt{queue.ts} talk to the database and Redis.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{backend_modules}
 	\caption{Modules of the backend and their dependencies}
@@ -67,7 +67,7 @@ An upload is streamed to disk under a random name, so even 1\,GB never has to fi
 
 \section{The AI worker}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.25\textwidth}|p{0.66\textwidth}|}
 		\hline
@@ -96,7 +96,7 @@ An upload is streamed to disk under a random name, so even 1\,GB never has to fi
 
 The stage modules know nothing about the queue or the web platform; they take and return pandas tables, so scripts and tests can use them directly. \autoref{fig:classes} shows the main classes.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{classes_worker}
 	\caption{Main classes of the worker}
@@ -138,9 +138,9 @@ During the long-video runs my laptop went to sleep while the GPU analysed the se
 
 \paragraph{The remote GPU service.} \texttt{gpu\_\allowbreak{}server.\allowbreak{}py} is a small FastAPI service that runs the same pipeline on a GPU machine (\autoref{fig:gpu-sequence}). Only the computation moves there; the queue, database and storage stay on the main server, so that server never has to be reachable from the internet. A full half is over 500\,MB, so the video is uploaded in 50\,MB pieces. If the GPU service cannot be reached, the worker analyses the video locally.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=0.9\textwidth]{gpu_sequence}
+	\includegraphics[width=0.7\textwidth]{gpu_sequence}
 	\caption{The worker and the remote GPU service}
 	\label{fig:gpu-sequence}
 \end{figure}
@@ -149,7 +149,7 @@ During the long-video runs my laptop went to sleep while the GPU analysed the se
 
 The dashboard is a React single-page application in \texttt{frontend/src/}. \autoref{fig:frontend-modules} shows its modules: the pages use shared components, every request to the server goes through \texttt{api.ts}, and live updates arrive through one WebSocket hook, \texttt{use\allowbreak{}Match\allowbreak{}Updates}. The overlay logic in \texttt{analysis/} does not use React at all, which is why it can be unit-tested on its own.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.85\textwidth]{frontend_modules}
 	\caption{Modules of the dashboard and their dependencies}
@@ -158,14 +158,14 @@ The dashboard is a React single-page application in \texttt{frontend/src/}. \aut
 
 \autoref{fig:navigation} shows the navigation between the pages: the log-in and registration pages are public, while the match list, the upload page and the match page require a log-in. \autoref{fig:wireframes} is the screen plan of the four main pages, with the parts of each page before any styling.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=0.85\textwidth]{navigation}
+	\includegraphics[width=\textwidth]{navigation}
 	\caption{Navigation between the pages}
 	\label{fig:navigation}
 \end{figure}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{wireframes}
 	\caption{Screen plans (wireframes) of the main pages}

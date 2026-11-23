@@ -2,14 +2,14 @@
 
 The database has two tables (\autoref{fig:er}), defined in the Prisma schema; Prisma generates a typed client from it and an SQL migration for every change. A \texttt{User} has an ID, e-mail address (unique, stored in lower case), name, bcrypt password hash and creation time. \autoref{tab:match-table} describes the \texttt{Match} table.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{er}
 	\caption{Entity-relationship diagram}
 	\label{fig:er}
 \end{figure}
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.24\textwidth}|p{0.67\textwidth}|}
 		\hline
@@ -38,7 +38,7 @@ The database has two tables (\autoref{fig:er}), defined in the Prisma schema; Pr
 	\label{tab:match-table}
 \end{table}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{status}
 	\caption{States of a match}
@@ -47,7 +47,7 @@ The database has two tables (\autoref{fig:er}), defined in the Prisma schema; Pr
 
 The large analysis output is deliberately kept out of the database: a full half produces a 54\,MB results file, which is served from disk, while the database holds only the small summary. The results file is the contract between the worker and the dashboard (\autoref{tab:results}). People are stored as compact arrays instead of objects, which halved the file size.
 
-\begin{table}[htbp]
+\begin{table}[H]
 	\centering
 	\begin{tabular}{|p{0.2\textwidth}|p{0.7\textwidth}|}
 		\hline
@@ -81,9 +81,9 @@ A job in the \texttt{match-analysis} queue carries the match ID, the video path 
 
 The analysis is the hardest part of the project. \texttt{run\_\allowbreak{}analysis()} in \texttt{pipeline.py} chains the stages in \autoref{fig:pipeline}; each stage is a separate module that takes and returns a pandas table with one row per detection per frame. The first version was built and tuned on 30-second clips. Running it on two full halves showed many problems the clips had hidden, and a good part of what follows was added because of them.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=\textwidth]{pipeline}
+	\includegraphics[width=0.65\textwidth]{pipeline}
 	\caption{The stages of the analysis pipeline}
 	\label{fig:pipeline}
 \end{figure}
@@ -104,7 +104,7 @@ To measure in metres, each player's foot point is converted from image pixels to
 \end{equation}
 A second YOLOv8 model finds up to 32 known pitch landmarks in the image, such as the corners of the penalty areas (\autoref{fig:keypoints}). Their real positions on a $105 \times 68$\,m pitch are known, so $H$ can be fitted from them with RANSAC~\cite{ransac}, which ignores single wrongly detected landmarks. Because the camera pans and zooms, a new $H$ is fitted every few frames.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.85\textwidth]{pitch_keypoints}
 	\caption{The 32 pitch landmarks}
@@ -113,7 +113,7 @@ A second YOLOv8 model finds up to 32 known pitch landmarks in the image, such as
 
 Each fit is made on its own, so neighbouring fits can disagree slightly even though the real camera moved smoothly. On the first full half this made all movement paths jump across the video whenever a new fit arrived. The worker therefore smooths the camera model: it follows where four fixed points of the picture land on the pitch, smooths those positions over 1.5 seconds with a running median, and rebuilds $H$ from them. This cut the large jumps by about three quarters (\autoref{fig:camera-wobble}) while moving player positions by a median of only 0.16\,m.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=0.9\textwidth]{camera_wobble}
 	\caption{Jumps of the camera model before and after smoothing}
@@ -125,7 +125,7 @@ Each fit is made on its own, so neighbouring fits can disagree slightly even tho
 
 During stoppages a full half showed the touchline, where substitutes and staff stand, and spare balls lying beside it. With positions in metres both are easy to remove. A person whose usual (median) position is more than 0.5\,m outside the pitch lines is not part of the game and is removed; deciding over the whole track keeps a player who steps out for a throw-in. For the ball, the candidate closest to where the ball was a moment ago is kept, as long as the ball could have got there (no shot is faster than about 40\,m/s); candidates off the pitch and on the penalty spots are ignored when the path restarts. On the first half this removed 258 tracks of sideline people, and the share of ball positions off the pitch fell from 12\,\% to 0. \autoref{fig:ball-candidates} shows a stoppage after a goal, in which the old rule placed the ball on a spare ball beyond the far touchline in 344 of 375 frames.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{ball_candidates}
 	\caption{Ball candidates during a stoppage: the two red circles are spare balls behind the far touchline, which the old rule took for the match ball}
@@ -136,14 +136,7 @@ During stoppages a full half showed the touchline, where substitutes and staff s
 
 Players are split into teams by shirt colour. For each track, the torso region of up to ten detections is cropped, the grass colour measured around the player is removed, and the remaining pixels give the shirt colour in the CIE Lab colour space~\cite{opencvlab}. K-Means~\cite{kmeans} then splits the tracks into two teams. Goalkeepers wear a different kit, so they join the team whose players are closest to them.
 
-The detector often called the main referee a player, and he then joined a team. The referee kit colour is therefore learned from the tracks the model does call referees (usually the assistants), and a ``player'' whose shirt is much closer to that colour than to either team colour becomes a referee. To choose ``much closer'', I ranked the candidate tracks and looked at a crop of each (\autoref{fig:referee-candidates}): below a ratio of about 0.65 almost all were officials, and from 0.68 white Real Madrid players appeared. A goalkeeper is only checked if he stands outside both penalty areas, because goalkeepers also wear a colour unlike both teams.
-
-\begin{figure}[htbp]
-	\centering
-	\includegraphics[width=\textwidth]{referee_candidates}
-	\caption{Tracks the detector called players, ranked by how much closer their shirt is to the referee colour than to the team colours; nearly all below 0.65 are officials}
-	\label{fig:referee-candidates}
-\end{figure}
+The detector often called the main referee a player, and he then joined a team. The referee kit colour is therefore learned from the tracks the model does call referees (usually the assistants), and a ``player'' whose shirt is much closer to that colour than to either team colour becomes a referee. To choose ``much closer'', I ranked the candidate tracks and looked at a crop of each: below a ratio of about 0.65 almost all were officials, and from 0.68 white Real Madrid players appeared. A goalkeeper is only checked if he stands outside both penalty areas, because goalkeepers also wear a colour unlike both teams.
 
 \subsection{Joining tracks and position labels}
 \label{sec:positions}
@@ -156,14 +149,14 @@ Instead of track numbers, players are therefore labelled by position. The format
 
 A formation cannot be seen in a single frame, so the average positions of a team's outfield players are computed over 5-second windows, scaled to a unit square and compared with nine formation templates (\autoref{fig:templates}). The cost of a template is the mean distance between players and slots under the best one-to-one assignment, found with the Hungarian algorithm (\autoref{fig:matching}). A new formation is only accepted when it fits clearly better than the current one and has lasted 20 seconds; without this rule the first half reported 282 formation changes instead of 14.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
-	\includegraphics[width=0.8\textwidth]{formation_templates}
+	\includegraphics[width=0.62\textwidth]{formation_templates}
 	\caption{The nine formation templates}
 	\label{fig:templates}
 \end{figure}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 	\centering
 	\includegraphics[width=\textwidth]{formation_matching}
 	\caption{Matching one window of a team to the best template and the runner-up}
