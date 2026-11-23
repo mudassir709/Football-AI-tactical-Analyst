@@ -281,13 +281,86 @@ def clip_statistics() -> None:
               f"margins={[w['confidenceMargin'] for w in classified]}")
 
 
+def wireframes() -> None:
+    """Simple screen plans of the four main pages: grey boxes with labels, no styling."""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7.6))
+
+    def box(ax, x, y, w, h, text="", dashed=False, filled=False, size=11):
+        # One labelled rectangle of a wireframe (coordinates: 0-100 wide, 0-62 high)
+        ax.add_patch(plt.Rectangle((x, y), w, h, fill=filled, facecolor="#d9d9d9", edgecolor="#555",
+                                   linewidth=1.2, linestyle="--" if dashed else "-"))
+        if text:
+            ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=size, color="#222")
+
+    def page(ax, title, header=True):
+        # Browser frame of a page, with the shared header bar when logged in
+        ax.set_xlim(0, 100), ax.set_ylim(0, 62), ax.set_aspect("equal"), ax.axis("off")
+        ax.set_title(title, fontsize=14, pad=6)
+        box(ax, 0, 0, 100, 62)
+        if header:
+            box(ax, 0, 56, 100, 6, filled=True)
+            ax.text(2, 59, "Tactical Eye   Matches   Upload", va="center", fontsize=10)
+            ax.text(98, 59, "name · Log out", va="center", ha="right", fontsize=10)
+
+    # (a) Log-in page: illustration on the left, form on the right
+    ax = axes[0][0]
+    page(ax, "(a) Log in / register", header=False)
+    box(ax, 4, 6, 42, 50, "chalk pitch\nillustration", dashed=True)
+    ax.text(58, 50, "Log in", fontsize=12, weight="bold")
+    box(ax, 58, 38, 36, 6, "E-mail")
+    box(ax, 58, 29, 36, 6, "Password")
+    box(ax, 58, 19, 36, 6, "Log in", filled=True)
+    ax.text(58, 11, "New here? Create an account", fontsize=10)
+
+    # (b) Match list: one row per match
+    ax = axes[0][1]
+    page(ax, "(b) Match list")
+    ax.text(4, 50, "Matches", fontsize=12, weight="bold")
+    box(ax, 74, 47, 22, 6, "+ Upload a match", filled=True, size=10)
+    for i, y in enumerate((36, 27, 18, 9)):
+        box(ax, 4, y, 92, 8)
+        ax.text(6, y + 4, "title · date · size", va="center", fontsize=10)
+        ax.text(43, y + 4, "formations", va="center", fontsize=10)
+        ax.text(62, y + 4, "status", va="center", fontsize=10, style="italic")
+        ax.text(73, y + 4, "Delete", va="center", fontsize=10)
+        box(ax, 84, y + 1.5, 11, 5, "Open", size=9)
+
+    # (c) Upload page: three numbered steps and a tips box
+    ax = axes[1][0]
+    page(ax, "(c) Upload")
+    ax.text(4, 51, "Upload a match", fontsize=12, weight="bold")
+    box(ax, 4, 34, 62, 13, "1  drop or choose the video", dashed=True)
+    box(ax, 4, 24, 62, 6, "2  title")
+    box(ax, 4, 13, 30, 8, "3  Standard", size=10)
+    box(ax, 36, 13, 30, 8, "Quick", size=10)
+    box(ax, 4, 3, 30, 7, "Upload and analyse", filled=True, size=10)
+    box(ax, 70, 24, 26, 23, "tips for\ngood results", dashed=True, size=10)
+
+    # (d) Match page: video with controls, tactical board, tabs
+    ax = axes[1][1]
+    page(ax, "(d) Analysis of a match")
+    ax.text(4, 51, "Match title · status", fontsize=12, weight="bold")
+    box(ax, 80, 49, 16, 5, "Re-analyse", size=10)
+    box(ax, 4, 22, 58, 25, "video with overlays\n(full-screen button)")
+    box(ax, 4, 16, 58, 5, "play · ±1 frame · seek bar · speed", size=9)
+    box(ax, 4, 10, 58, 5, "layer buttons", size=9)
+    box(ax, 65, 22, 31, 25, "tactical board")
+    box(ax, 65, 10, 15, 11, "formation\nTeam A", size=9)
+    box(ax, 81, 10, 15, 11, "formation\nTeam B", size=9)
+    box(ax, 4, 2, 92, 6, "tabs: Summary · Player · AI coaching report", size=10)
+
+    fig.tight_layout()
+    fig.savefig(OUT / "wireframes.pdf", bbox_inches="tight")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    pitch_keypoints()
-    formation_templates()
-    formation_matching()
-    performance()
-    use_case_diagram()
-    long_video_stages()
-    camera_wobble()
-    clip_statistics()
+    # Figures can be named on the command line to rebuild only those, e.g. "wireframes"
+    selected = sys.argv[1:]
+    for figure in (pitch_keypoints, formation_templates, formation_matching, performance,
+                   use_case_diagram, long_video_stages, camera_wobble, wireframes):
+        if not selected or figure.__name__ in selected:
+            figure()
+    if not selected:
+        clip_statistics()

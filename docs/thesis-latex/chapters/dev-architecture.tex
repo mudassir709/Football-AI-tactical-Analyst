@@ -123,6 +123,46 @@ TypeScript runs on both the dashboard and the API, so the shapes of shared data 
 
 For detection I used YOLOv8 weights that Roboflow trained on broadcast football~\cite{roboflowsports}; training my own model would have needed thousands of annotated frames and GPU time I did not have. I chose to draw the results in the browser instead of rendering a new video with burnt-in graphics, because only a live drawing lets the user switch layers, click players and step through frames.
 
+\subsection{Reused components and my own work}
+\label{sec:reuse}
+
+The detection side of the project stands on Roboflow's open-source \texttt{sports} repository~\cite{roboflowsports}. Its football example detects players, tracks them, splits them into teams and draws them on a radar view of the pitch. I took its two trained models and its numbering of the pitch landmarks, and the example gave me the idea of grouping players into teams by their appearance. Everything that turns these detections into tactics over a whole match, and the whole web platform, is my own work. \autoref{tab:reuse} draws the line.
+
+\begin{longtable}{|p{0.25\textwidth}|p{0.27\textwidth}|p{0.39\textwidth}|}
+	\hline
+	\textbf{Component} & \textbf{Origin} & \textbf{My part} \\
+	\hline
+	\endhead
+	Player, goalkeeper, referee and ball detector & Roboflow \texttt{sports}, trained with YOLOv8 & Used unchanged; I chose the resolution and confidence settings. \\
+	\hline
+	Pitch landmark model and the order of its 32 landmarks & Roboflow \texttt{sports} & Used unchanged; I wrote the pitch geometry in metres. \\
+	\hline
+	Tracking (ByteTrack), detection utilities & \texttt{trackers} and \texttt{supervision} libraries & Used as libraries. \\
+	\hline
+	Homography fitting with RANSAC & OpenCV & Called from my own code, which picks the landmarks and checks the fit. \\
+	\hline
+	Team assignment & Idea from the Roboflow example (image features of each player, then K-Means) & Own method: shirt colour in Lab space with the local grass colour removed, then K-Means. \\
+	\hline
+	Goalkeepers to the nearest team & Idea from the Roboflow example (per frame) & Averaged over the goalkeeper's whole track. \\
+	\hline
+	Camera smoothing & Own & Running median of the camera model in pitch coordinates (\autoref{sec:pipeline}). \\
+	\hline
+	Clean-up & Own & Removing people off the pitch, choosing the real ball among the candidates (\autoref{sec:cleanup}). \\
+	\hline
+	Referee rule & Own & Learning the referee kit from the assistants and relabelling players. \\
+	\hline
+	Track joining, position labels & Own & Hungarian matching of broken tracks; labels such as LB or ST (\autoref{sec:positions}). \\
+	\hline
+	Formations & Own & Nine templates, matching per 5-second window, stability rule. \\
+	\hline
+	Metrics & Own & Team shape, distances, speeds, heatmaps (\autoref{sec:metrics}). \\
+	\hline
+	Web platform & Own & API, queue, worker, GPU service, cancelling, dashboard and frame-exact overlays. \\
+	\hline
+	\caption{Reused components and my own work}
+	\label{tab:reuse}
+\end{longtable}
+
 \subsection{Layers}
 
 Each service is layered. In the dashboard, pages compose reusable components, all server calls go through one API module and one WebSocket hook, and the overlay logic sits in pure modules without React (\texttt{timeline.ts}, \texttt{geometry.ts}, \texttt{draw.ts}). In the API, routes validate input and call service modules (queue, storage, report), which use the Prisma client. In the worker, \texttt{worker.py} talks to the queue and knows nothing about computer vision; it calls \texttt{run\_\allowbreak{}analysis()}, which chains independent stage modules that exchange pandas tables.

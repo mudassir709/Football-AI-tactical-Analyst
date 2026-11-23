@@ -27,7 +27,7 @@
 % University's metadata
 \university{Eötvös Loránd University}
 \faculty{Faculty of Informatics}
-\department{Dept. of Media and Educational Training}
+\department{Department of Media and\\Educational Technology}
 \city{Budapest}
 \logo{elte_cimer_szines}
 
@@ -61,6 +61,12 @@
 
 \begin{document}
 \documentlang{english}
+% Cross-references print "Chapter 2" and "Section 3.8" with a capital letter.
+% This must come after \documentlang, which resets the names to lower case.
+\renewcommand{\chapterautorefname}{Chapter}
+\renewcommand{\sectionautorefname}{Section}
+\renewcommand{\subsectionautorefname}{Section}
+\renewcommand{\subsubsectionautorefname}{Section}
 
 % List of todos (hidden with the "final" option)
 %\listoftodos[\todolabel]

@@ -61,12 +61,12 @@ The analysis is heavy. On a laptop CPU a 30-second clip takes about 25 minutes; 
 \begin{enumerate}
 	\item Install \textbf{Docker Desktop} from \url{https://www.docker.com} and start it.
 	\item Download the code with \texttt{git clone} from \url{https://github.com/mudassir709/Football-AI-tactical-Analyst.git}
-	\item Download the two AI models (270\,MB) into \texttt{worker/\allowbreak{}models/} under exactly these names:
+	\item Download the two AI models (270\,MB) into \texttt{worker/\allowbreak{}models/} under exactly these names. Both files are attached to the project's GitHub release \url{https://github.com/mudassir709/Football-AI-tactical-Analyst/releases/tag/models-v1}, which also lists their SHA-256 checksums. The original links, published by Roboflow, are:
 	\begin{itemize}
 		\item \texttt{football-player-detection.\allowbreak{}pt}: \url{https://drive.google.com/uc?id=17PXFNlx-jI7VjVo_vQnB1sONjRyvoB-q}
 		\item \texttt{football-pitch-detection.\allowbreak{}pt}: \url{https://drive.google.com/uc?id=1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf}
 	\end{itemize}
-	On a server without a browser, \texttt{pip install gdown} and \texttt{gdown -O <file name> "<link>"} download them.
+	On a server without a browser, \texttt{pip install gdown} and \texttt{gdown -O <file name> "<link>"} download them from Google Drive.
 	\item Copy \texttt{.env.example} to \texttt{.env} and fill in the settings (\autoref{tab:env}). \texttt{JWT\_SECRET} must be a random string of at least 32 characters; this command prints one:
 \begin{lstlisting}[style=plain]
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
@@ -77,7 +77,9 @@ docker compose --profile app up -d --build
 \end{lstlisting}
 \end{enumerate}
 
-The first start takes several minutes while Docker builds the images; later starts take seconds. Five containers start: \texttt{frontend} (the dashboard on port 8080), \texttt{backend} (the API), \texttt{worker} (the AI analysis), \texttt{postgres} (the database) and \texttt{redis} (the job queue). The address \url{http://localhost:8080/api/health} answers \texttt{"status":"ok"} with \texttt{"workers":1} when everything runs. \texttt{docker compose --profile app stop} stops the platform; matches and accounts are kept in the \texttt{storage/} folder and the database volume.
+The first start takes several minutes while Docker builds the images; later starts take seconds. Five containers start: \texttt{frontend} (the dashboard on port 8080), \texttt{backend} (the API), \texttt{worker} (the AI analysis), \texttt{postgres} (the database) and \texttt{redis} (the job queue). The address \url{http://localhost:8080/api/health} answers \texttt{"status":"ok"} with \texttt{"workers":1} when everything runs. \texttt{docker compose -{}-profile app stop} stops the platform; matches and accounts are kept in the \texttt{storage/} folder and the database volume.
+
+\paragraph{Where the models come from.} I did not train the two models myself. They are published with Roboflow's open-source \texttt{sports} repository~\cite{roboflowsports}, whose set-up script downloads them from the Google Drive links above. Roboflow trained them with Ultralytics YOLOv8~\cite{yolov8} on football footage from the DFL Bundesliga Data Shootout~\cite{dfl}. The code of the \texttt{sports} repository is under the MIT licence, and Ultralytics states that every model trained with YOLOv8 falls under the AGPL-3.0 licence~\cite{ultralyticslicense}, so the model files carry that licence. Because files on a personal Google Drive can disappear, I attached copies to the project's GitHub release, with checksums to verify them.
 
 \begin{table}[htbp]
 	\centering
@@ -136,7 +138,7 @@ The dashboard is a single-page application, so moving between pages does not rel
 
 \subsection{The match list}
 
-The \emph{Matches} page (\autoref{fig:matches}) lists the user's uploads, newest first, with the title, date, file size, mode and a handwritten status note (\autoref{tab:status}). Finished matches also show each team's kit colour and main formation. The list updates by itself while analyses run, because the server pushes every change to the browser.
+The \emph{Matches} page (\autoref{fig:matches}) lists the user's uploads, newest first, with the title, date, file size, mode and a short status label such as \emph{analysing\dots} or \emph{ready}, shown in a handwriting-style font (\autoref{tab:status}). Finished matches also show each team's kit colour and main formation. The list updates by itself while analyses run, because the server pushes every change to the browser.
 
 \begin{figure}[htbp]
 	\centering
@@ -162,7 +164,7 @@ The \emph{Matches} page (\autoref{fig:matches}) lists the user's uploads, newest
 		cancelled -- & Stopped by the user; \emph{Re-analyse} starts it again. \\
 		\hline
 	\end{tabular}
-	\caption{Status notes}
+	\caption{Status labels in the match list}
 	\label{tab:status}
 \end{table}
 
@@ -490,7 +492,7 @@ Besides errors, the dashboard shows the information messages in \autoref{tab:inf
 
 \paragraph{The analysis is very slow.} On a CPU the analysis takes many times the length of the video. Quick mode helps for previews; for full halves, the cloud GPU service is the practical choice.
 
-\paragraph{The match stays queued.} No worker is running, or another match is being analysed first. The health address (\texttt{/api/health}) shows the number of workers; if it is 0, \texttt{docker compose --profile app up -d worker} starts the worker.
+\paragraph{The match stays queued.} No worker is running, or another match is being analysed first. The health address (\texttt{/api/health}) shows the number of workers; if it is 0, \texttt{docker compose -{}-profile app up -d worker} starts the worker.
 
 \paragraph{The labels change from one player to another.} Labels follow positions. When two players swap sides, their labels swap too, and a player who has only just come into view may have no label for a few seconds.
 

@@ -284,3 +284,31 @@ sequenceDiagram
   Q-->>A: completed event
   A-->>B: match:updated (completed)
   B->>A: GET results and video
+
+%% ==== backend_modules
+flowchart LR
+  APP["index.ts · app.ts<br/>server · Socket.IO<br/>/api/health<br/>config.ts (Zod)"] --> RA["routes/auth.ts<br/>register · login<br/>logout · me"]
+  APP --> RM["routes/matches.ts<br/>upload · list · get<br/>video · results<br/>report · reanalyse<br/>cancel · delete"]
+  RA --> AU["auth.ts<br/>sign / verify token<br/>requireAuth"]
+  RM --> AU
+  RM --> Q["queue.ts<br/>enqueue · cancel<br/>queue events"]
+  RM --> ST["storage.ts<br/>paths · file checks"]
+  RM --> REP["report.ts · colours.ts<br/>coaching report"]
+  RM --> MV["matchView.ts<br/>public match view"]
+  RA --> DB[("db.ts · Prisma<br/>PostgreSQL")]
+  RM --> DB
+  Q --> DB
+  Q --> RD[("Redis<br/>BullMQ")]
+  REP --> AZ(["Azure<br/>OpenAI"])
+
+%% ==== frontend_modules
+flowchart TB
+  MAIN["main.tsx · App.tsx<br/>routes"] --> PAGES["pages/<br/>AuthPage · MatchesPage<br/>UploadPage · MatchPage"]
+  MAIN --> AUTH["auth.tsx<br/>AuthProvider · useAuth"]
+  PAGES --> COMP["components/<br/>Layout · VideoAnalysis<br/>CoachingReport · ChalkPitch · ui"]
+  PAGES --> API["api.ts<br/>all REST calls · uploadMatch"]
+  PAGES --> WS["useMatchUpdates.ts<br/>live updates (Socket.IO)"]
+  AUTH --> API
+  COMP --> ANA["analysis/<br/>timeline · geometry · draw"]
+  API --> SRV(["Backend API"])
+  WS --> SRV

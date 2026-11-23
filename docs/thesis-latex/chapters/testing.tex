@@ -187,7 +187,26 @@ Three observations shaped the implementation. The first job after a worker start
 
 \section{Scalability}
 
-Workers share nothing but the queue and the storage, and the queue gives each job to exactly one worker, so throughput grows with the number of workers. More workers start with \texttt{docker compose --profile app up -d --scale worker=N}, or on other machines that can reach the same storage. The GPU service keeps no state apart from its running jobs and can run on several machines. The API is stateless except for its WebSocket connections; several API instances behind a load balancer would need a shared channel for the live updates, such as the Socket.IO Redis adapter.
+Workers share nothing but the queue and the storage, and the queue gives each job to exactly one worker, so the design lets throughput grow with the number of workers. More workers start with \texttt{docker compose -{}-profile app up -d -{}-scale worker=N}, or on other machines that can reach the same storage.
+
+I measured this on the laptop. Four copies of the 3-second test clip were uploaded at once in Quick mode, once with one worker and once with two (\autoref{tab:throughput}). With two workers, both jobs ran side by side as intended, but each took about twice as long, and the four jobs finished only 10\,\% sooner. The reason is that both workers run on the same 12 processor threads: PyTorch already uses all of them for a single job, so a second worker on the same machine mostly takes turns with the first. Memory peaked at 4.4\,GB of the 5.8\,GB available to Docker. More workers therefore pay off only on separate machines or GPUs, which I could not test; a first two-worker run that overlapped with another heavy program on the laptop was even slower (777\,s) and is not counted.
+
+\begin{table}[htbp]
+	\centering
+	\begin{tabular}{|p{0.22\textwidth}|p{0.2\textwidth}|p{0.2\textwidth}|p{0.22\textwidth}|}
+		\hline
+		\textbf{Workers} & \textbf{4 jobs took} & \textbf{Jobs per minute} & \textbf{Time per job} \\
+		\hline
+		1 & 327\,s & 0.73 & about 80\,s, one at a time \\
+		\hline
+		2 & 299\,s & 0.80 & about 170\,s, two at a time \\
+		\hline
+	\end{tabular}
+	\caption{Throughput on the laptop CPU (four 3-second clips, Quick mode)}
+	\label{tab:throughput}
+\end{table}
+
+The GPU service keeps no state apart from its running jobs and can run on several machines. The API is stateless except for its WebSocket connections; several API instances behind a load balancer would need a shared channel for the live updates, such as the Socket.IO Redis adapter.
 
 Processing time and the results file grow linearly with the length of the video: about 54\,MB per half and about 110\,MB for a full match. The dashboard still loads this as one file; a future version could load it in segments.
 

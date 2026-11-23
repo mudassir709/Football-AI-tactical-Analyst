@@ -1,6 +1,13 @@
 \section{The backend (API)}
 
-The API in \texttt{backend/src/} is an Express 5 application in TypeScript. \texttt{app.ts} builds the application, \texttt{config.ts} validates the settings, \texttt{auth.ts} handles sessions, \texttt{routes/} holds the endpoints, \texttt{queue.ts} the job queue, \texttt{storage.ts} the files and \texttt{report.ts} the coaching report.
+The API in \texttt{backend/src/} is an Express 5 application in TypeScript. \texttt{app.ts} builds the application, \texttt{config.ts} validates the settings, \texttt{auth.ts} handles sessions, \texttt{routes/} holds the endpoints, \texttt{queue.ts} the job queue, \texttt{storage.ts} the files and \texttt{report.ts} the coaching report. \autoref{fig:backend-modules} shows which module uses which. Only the two route modules receive requests; they check the session with \texttt{auth.ts} and leave the work to the service modules, and only \texttt{db.ts} and \texttt{queue.ts} talk to the database and Redis.
+
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[width=\textwidth]{backend_modules}
+	\caption{Modules of the backend and their dependencies}
+	\label{fig:backend-modules}
+\end{figure}
 
 \begin{longtable}{|p{0.12\textwidth}|p{0.29\textwidth}|p{0.50\textwidth}|}
 	\hline
@@ -140,20 +147,29 @@ During the long-video runs my laptop went to sleep while the GPU analysed the se
 
 \section{The frontend}
 
-The dashboard is a React single-page application. \autoref{fig:components} shows its components and \autoref{fig:navigation} the navigation between its pages: the log-in and registration pages are public, while the match list, the upload page and the match page require a log-in. Pages receive live updates through one WebSocket hook, \texttt{use\allowbreak{}Match\allowbreak{}Updates}.
+The dashboard is a React single-page application in \texttt{frontend/src/}. \autoref{fig:frontend-modules} shows its modules: the pages use shared components, every request to the server goes through \texttt{api.ts}, and live updates arrive through one WebSocket hook, \texttt{use\allowbreak{}Match\allowbreak{}Updates}. The overlay logic in \texttt{analysis/} does not use React at all, which is why it can be unit-tested on its own.
 
 \begin{figure}[htbp]
 	\centering
-	\includegraphics[width=0.9\textwidth]{frontend_components}
-	\caption{Components of the dashboard}
-	\label{fig:components}
+	\includegraphics[width=0.85\textwidth]{frontend_modules}
+	\caption{Modules of the dashboard and their dependencies}
+	\label{fig:frontend-modules}
 \end{figure}
+
+\autoref{fig:navigation} shows the navigation between the pages: the log-in and registration pages are public, while the match list, the upload page and the match page require a log-in. \autoref{fig:wireframes} is the screen plan of the four main pages, with the parts of each page before any styling.
 
 \begin{figure}[htbp]
 	\centering
 	\includegraphics[width=0.85\textwidth]{navigation}
 	\caption{Navigation between the pages}
 	\label{fig:navigation}
+\end{figure}
+
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[width=\textwidth]{wireframes}
+	\caption{Screen plans (wireframes) of the main pages}
+	\label{fig:wireframes}
 \end{figure}
 
 \subsection{Drawing in sync with the video}
