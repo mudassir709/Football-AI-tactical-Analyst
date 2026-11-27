@@ -1,6 +1,6 @@
 \section{Data design}
 
-The database has two tables (\autoref{fig:er}), defined in the Prisma schema; Prisma generates a typed client from it and an SQL migration for every change. A \texttt{User} has an ID, e-mail address (unique, stored in lower case), name, bcrypt password hash and creation time. \autoref{tab:match-table} describes the \texttt{Match} table.
+The database contains two tables (\autoref{fig:er}) that are defined by the Prisma Schema. From this schema, Prisma creates a typed Client and an SQL migration for every modification. Each \texttt{User} will contain an ID, email address (unique and converted to all lower-case characters), name, bcrypt password hash and creation time. \autoref{tab:match-table} describes the \texttt{Match} table.
 
 \begin{figure}[H]
 	\centering
@@ -45,7 +45,7 @@ The database has two tables (\autoref{fig:er}), defined in the Prisma schema; Pr
 	\label{fig:status}
 \end{figure}
 
-The large analysis output is deliberately kept out of the database: a full half produces a 54\,MB results file, which is served from disk, while the database holds only the small summary. The results file is the contract between the worker and the dashboard (\autoref{tab:results}). People are stored as compact arrays instead of objects, which halved the file size.
+The large analysis result files have been intentionally excluded from the database; it would be too much to store every single result in the database (each half generates a 54\,MB results file), but since the results file is stored on the hard drive, the API can serve it from there. Database holds only the small summary. The results file is the contract between the worker and the dashboard (\autoref{tab:results}). A person is represented as a compact array (as opposed to an object) resulting in a smaller file.
 
 \begin{table}[H]
 	\centering
@@ -72,14 +72,14 @@ The large analysis output is deliberately kept out of the database: a full half 
 	\label{tab:results}
 \end{table}
 
-Files live in the storage folder shared by the API and the worker: \texttt{videos/} holds the uploads, stored under random names, and their playback copies, and \texttt{results/} holds the results files. The API never trusts a path from outside; every stored path is resolved and refused if it leaves the storage folder, and the worker repeats the check before opening a file.
+Files are stored within the common directory used by both the API and Worker: \texttt{videos/} stores all uploaded videos (with unique names) as well as the playback copies, while \texttt{results/} stores all result files. The API never accepts a file path from an external source; every stored path is resolved and refused if it leaves the storage folder, and the worker repeats the check before opening a file.
 
-A job in the \texttt{match-analysis} queue carries the match ID, the video path and the mode. While it works, the worker reports its progress and current step. On success it returns the paths of the results and the playback copy together with the summary; on failure, the error message becomes the reason shown to the user. Jobs get two attempts, 10 seconds apart.
+Each job placed into the \texttt{match-analysis} queue includes the match ID, video path, and mode. During execution, the worker sends updates on its status and current task at which point it will send the paths of results, playback copy and summary upon completion. If the worker fails to complete the task, it will return an error message which will be presented to the user. Each job has two chances at completing the task, waiting 10 seconds between each chance.
 
 \section{The analysis pipeline}
 \label{sec:pipeline}
 
-The analysis is the hardest part of the project. \texttt{run\_\allowbreak{}analysis()} in \texttt{pipeline.py} chains the stages in \autoref{fig:pipeline}; each stage is a separate module that takes and returns a pandas table with one row per detection per frame. The first version was built and tuned on 30-second clips. Running it on two full halves showed many problems the clips had hidden, and a good part of what follows was added because of them.
+The most difficult part of this project would be the analysis. \texttt{run\_\allowbreak{}analysis()} in \texttt{pipeline.py} chains the stages in \autoref{fig:pipeline}; each stage is a separate module being responsible for taking and returning a pandas table representing detections, one row per detection per frame. My initial build and tuning were done using 30-second clip files. When I ran it on both of my half-length videos, I found many issues which were masked by the clips, thus some of the things I have described below were to correct those problems.
 
 \begin{figure}[H]
 	\centering
@@ -166,4 +166,4 @@ A formation cannot be seen in a single frame, so the average positions of a team
 \subsection{Metrics}
 \label{sec:metrics}
 
-From the smoothed positions, the worker computes each team's compactness (the area of the convex hull of its outfield players), width and depth per frame, and for every position the distance covered, the time visible, the average speed and a heatmap. Steps that would mean more than 12\,m/s are tracking errors and are ignored. The top speed is the best average over one second rather than the fastest single step: an early version reported 39.6\,km/h on one clip because a single displaced position counted as a sprint.
+The worker determines each team’s compactness (the area of the convex hull of its outfield players), width and depth per frame from the smoothed positions, and the distance travelled by each position, how long it was in view, the average speed, and a heatmap for every position. Any steps with speeds greater than 12\,m/s will be considered as tracking errors and are ignored. The top speed is the best average over one second versus the fastest single step; an earlier version incorrectly reported 39.6\,km/h on one clip due to a single displaced position being considered a sprint.

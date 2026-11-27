@@ -63,7 +63,7 @@ An upload is streamed to disk under a random name, so even 1\,GB never has to fi
 
 \paragraph{Cancelling.} A queued job is simply removed from the queue. A running job belongs to the worker that holds it, so the API leaves a note in Redis instead. The worker checks for the note every two seconds and stops at the next progress report, which the pipeline sends hundreds of times per analysis; on the GPU it also tells the GPU service to stop. In the system test the analysis stopped 4 seconds after the request.
 
-\paragraph{The coaching report.} The API sends the model only the statistics: formations over time, team shape per third of the video, and the three positions that ran furthest. The first reports said ``Team A (kit \#C7C9AA)'' and ``Player \#17''; now a small function turns the measured kit colour into a name such as ``white'' or ``navy'', and players are sent as positions such as ``LB (left back)''. The model runs on Azure OpenAI~\cite{azureopenai}, which the Azure for Students credit covers.
+\paragraph{The coaching report.} The API is sending only the data to the model, namely, the statistic of formation by time, the team's shape per third of the video, and the three longest distance positions. Initially it was reported as ``Team A (kit \#C7C9AA)'' and ``Player \#17''; now an additional small function converts the colour of the kit into a name like ``white'' or ``navy'', and the player is sent as position, like ``LB (left back)''. The model runs with Azure OpenAI~\cite{azureopenai} using the Azure for Students credit.
 
 \section{The AI worker}
 

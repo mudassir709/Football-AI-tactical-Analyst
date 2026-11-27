@@ -3,7 +3,7 @@
 
 \section{Test plan}
 
-In the first version only the worker had automated tests, and the system tests were steps I clicked through by hand before a demonstration. A change to the queue or the results format could break the platform without any test noticing. The testing now has five levels, and the first four run on every push in the CI pipeline (\autoref{sec:cicd}), so an image that fails any of them is never published. Static checks come first: the TypeScript compiler and the oxlint linter. White-box unit tests check the worker's algorithms (43 tests) and the dashboard's overlay mathematics (23 tests) with constructed data whose correct result is known. API tests send real HTTP requests to the backend, which uses a real PostgreSQL test database and Redis (42 tests). Black-box system tests use the whole running platform as a browser would (11 tests). The fifth level is measurement: an accuracy check against hand-annotated frames, the five demo clips, two full halves, and processing times.
+The first version was where only the worker had automated testing. All other testing for the system consisted of manual click-throughs before a demonstration. Any changes made to either the queue or the format of the output could possibly break the platform without being detected by any of the tests. The testing has been enhanced to include five different levels of testing, and the first four are run with each push within the CI pipeline (\autoref{sec:cicd}). Therefore, no images will ever be published if they fail any one of the first four. There are static checks first, utilizing the TypeScript compiler and the oxlint linter. Then there are white-box unit tests checking the algorithms utilized by both the worker (43 tests), and the overlay math used by the dashboard (23 tests) using constructed data, whose correct result value is well-known. Afterward, there are API tests sending actual HTTP requests to the back-end, using a real PostgreSQL test database, and Redis (42 tests). Then, black-box system tests use the whole running platform as a browser would (11 tests). The fifth level is measurement: an accuracy check against hand-annotated frames, the five demo clips, two full halves, and processing times.
 
 \section{Unit tests}
 
@@ -32,11 +32,11 @@ The worker's tests run with pytest in about 10 seconds and need no videos or mod
 	\label{tab:worker-tests}
 \end{table}
 
-The dashboard's 23 Vitest tests cover the pure overlay modules: projecting pitch points with a camera matrix, blending two matrices, the convex hull of the team shape, and the \texttt{Timeline}, which must return exact positions at analysed frames, interpolate between them, never blend across a long gap and assign the right position labels.
+The dashboard has 23 Vitest tests for pure overlay modules; these are: the camera matrix to project pitch point locations onto the screen (camera view), the blending of two camera matrices, the convex hull of the team shape, and the \texttt{Timeline}. This \texttt{Timeline} module is required to return precise positions at each frame that has been analysed, interpolate between them, never create a blended position from previous or next intervals where a large enough amount of time will have passed since they were last recorded, and correctly identify the label associated with the current position.
 
 \section{API tests}
 
-The 42 backend tests use Vitest~\cite{vitest} and SuperTest~\cite{supertest}. I decided against mocking the database, because most bugs I had found in the API were in how the routes, the database and the queue work together. The tests use their own PostgreSQL database and Redis database, so they never touch real data or reach the real worker. \autoref{tab:api-tests} summarises them.
+The 42 backend tests are written using Vitest~\cite{vitest} and SuperTest~\cite{supertest}. I was hesitant to mock out the database since nearly all of the bugs I have encountered with the API  involve how the routes, the database and the queue work together. The tests run on a separate PostgreSQL database and Redis database. Thus, neither ever interacts with actual user data nor reaches the actual worker. \autoref{tab:api-tests} summarises them.
 
 \begin{table}[H]
 	\centering
@@ -61,7 +61,7 @@ The 42 backend tests use Vitest~\cite{vitest} and SuperTest~\cite{supertest}. I 
 
 \section{System tests}
 
-The system tests run against the whole platform in Docker, through nginx, using HTTP and the WebSocket like a browser; nothing is mocked. They take about 11 minutes locally, mostly a real analysis on the CPU.
+The system tests are run against the entire platform inside Docker, via nginx, using HTTP and the WebSocket like a browser; nothing is mocked. These tests do take around 11 minutes locally, mostly a real analysis on the CPU.
 
 \begin{table}[H]
 	\centering
@@ -208,7 +208,7 @@ I measured this on the laptop. Four copies of the 3-second test clip were upload
 
 The GPU service keeps no state apart from its running jobs and can run on several machines. The API is stateless except for its WebSocket connections; several API instances behind a load balancer would need a shared channel for the live updates, such as the Socket.IO Redis adapter.
 
-Processing time and the results file grow linearly with the length of the video: about 54\,MB per half and about 110\,MB for a full match. The dashboard still loads this as one file; a future version could load it in segments.
+Both the processing time and the resulting file size grows linearly by the length of the video (i.e., approximately 54\,MB per half and 110\,MB for a full match). Currently, the dashboard loads the whole file at once. A future version may allow loading it in separate pieces.
 
 \section{Lessons learnt}
 

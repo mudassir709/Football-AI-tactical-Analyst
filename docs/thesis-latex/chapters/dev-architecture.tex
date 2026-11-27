@@ -31,7 +31,7 @@
 	\label{tab:functional}
 \end{longtable}
 
-The main non-functional requirements follow from the length of the analysis. No web request may wait for an analysis, and the dashboard must stay usable while it runs (responsiveness). More workers or a GPU must add capacity without changing the API (scalability). A crashed analysis is retried, partial results are never shown, and a job handed out twice is not analysed twice (reliability). Passwords are hashed, uploads validated and users isolated from each other (security). Long videos are streamed rather than held in memory (efficiency), and one command starts the whole platform (deployability).
+Non-functional requirements stem from the time needed to complete the analysis. Web requests cannot be blocked by waiting for an analysis to complete, and while an analysis is running, the dashboard remains operational (responsiveness). Adding either more workers or a GPU will increase the system's processing capacity without having to modify API (scalability). If an analysis crashes during its execution, it will automatically be restarted; the system will never display partially completed analyses; and a job assigned twice will not be analysed twice (reliability). The passwords entered into the system are stored as hashes, all uploaded files are checked for validity, and there is no way for any user to access another user's data or account information (security). Large video files are streamed, instead of being loaded into memory (efficiency); and with one command, the entire platform becomes operational (deployability).
 
 \autoref{fig:usecase} shows the actors: the registered user, the AI worker as a system actor that drives the analysis, and the operator who deploys the platform.
 
@@ -44,7 +44,7 @@ The main non-functional requirements follow from the length of the analysis. No 
 
 \section{Architecture}
 
-Tactical Eye has three tiers with very different resource needs (\autoref{fig:architecture}). The React single-page application in the browser renders the dashboard and the overlays. The Node.js API handles many short requests (log-in, uploads, lists, video streaming, live updates) and must stay responsive. The Python AI workers run long, CPU- or GPU-bound analyses, one at a time. The API and the workers communicate only through a BullMQ job queue on Redis~\cite{bullmq} and a shared storage folder; only the API uses the PostgreSQL database.
+Tactical Eye is divided into three layers that have different requirements for resources. (\autoref{fig:architecture}).The browser's React single page application will render the dashboard and the overlay, while the Node.js API will be required to handle many of the shorter request types (log-in, upload, list, video stream, real-time updates), all while being as responsive as possible. The Python AI worker will perform longer running processes that are CPU or GPU bound, one at a time. The API and the workers will communicate only through a BullMQ job queue on Redis~\cite{bullmq} and a shared storage folder; only the API uses the PostgreSQL database.
 
 \begin{figure}[H]
 	\centering
@@ -121,12 +121,12 @@ The central decision was that the API never runs an analysis itself. My first pr
 
 TypeScript runs on both the dashboard and the API, so the shapes of shared data are written once and checked by the compiler. The worker is in Python because the computer vision libraries are. Two languages need a queue both understand: Celery would have tied the queue to Python and RabbitMQ would have added another server, while BullMQ has Node.js and Python implementations that share the same Redis data. PostgreSQL won over MongoDB because the data is relational (users own matches, every query filters by owner).
 
-For detection I used YOLOv8 weights that Roboflow trained on broadcast football~\cite{roboflowsports}; training my own model would have needed thousands of annotated frames and GPU time I did not have. I chose to draw the results in the browser instead of rendering a new video with burnt-in graphics, because only a live drawing lets the user switch layers, click players and step through frames.
+I utilized pre-trained YOLOv8 weight trained by Roboflow on broadcast football~\cite{roboflowsports} for object-detection, as it was impractical for me to train a model myself (it would take thousands of annotated images and a lot of GPU processing power). I chose to draw the results in the browser instead of rendering a new video with burnt-in graphics, because only a live drawing lets the user switch layers, click players and step through frames.
 
 \subsection{Reused components and my own work}
 \label{sec:reuse}
 
-The detection side of the project stands on Roboflow's open-source \texttt{sports} repository~\cite{roboflowsports}. Its football example detects players, tracks them, splits them into teams and draws them on a radar view of the pitch. I took its two trained models and its numbering of the pitch landmarks, and the example gave me the idea of grouping players into teams by their appearance. Everything that turns these detections into tactics over a whole match, and the whole web platform, is my own work. \autoref{tab:reuse} draws the line.
+The detection part of this project uses an open source sports repository~\cite{roboflowsports} created by Roboflow from which I borrowed ideas for detecting players, tracking them as they move around the pitch, splitting detected player objects into teams and displaying each team with dots on a radar display of the pitch. I also borrowed the two pre-trained model files and Roboflow's numberings for all the pitch landmark points. The rest of what makes those detection results into tactics across a full game, plus the entire web application, is my own work. \autoref{tab:reuse} draws the line.
 
 \begin{longtable}{|p{0.25\textwidth}|p{0.27\textwidth}|p{0.39\textwidth}|}
 	\hline
@@ -165,7 +165,7 @@ The detection side of the project stands on Roboflow's open-source \texttt{sport
 
 \subsection{Layers}
 
-Each service is layered. In the dashboard, pages compose reusable components, all server calls go through one API module and one WebSocket hook, and the overlay logic sits in pure modules without React (\texttt{timeline.ts}, \texttt{geometry.ts}, \texttt{draw.ts}). In the API, routes validate input and call service modules (queue, storage, report), which use the Prisma client. In the worker, \texttt{worker.py} talks to the queue and knows nothing about computer vision; it calls \texttt{run\_\allowbreak{}analysis()}, which chains independent stage modules that exchange pandas tables.
+There are layers of services. The service layer exists within the dashboard with the page being a composite of reusable components, each server request goes through an API module and a single WebSocket hook, while the overlay logic resides in the pure modules that do not contain any React (e.g., \texttt{timeline.ts}, \texttt{geometry.ts}, \texttt{draw.ts}). Within the API, routes validate inputs before calling on service modules (queue, storage, report) that utilize the Prisma Client. In the worker, \texttt{worker.py} does not know anything about computer vision as it only communicates with the Queue and  calls \texttt{run\_\allowbreak{}analysis()}, which chains independent stage modules that exchange pandas tables.
 
 \section{Deployment and CI/CD}
 \label{sec:cicd}
