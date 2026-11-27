@@ -212,40 +212,41 @@ Both the processing time and the resulting file size grows linearly by the lengt
 
 \section{Lessons learnt}
 
-\begin{table}[H]
-	\centering
-	\begin{tabular}{|p{0.45\textwidth}|p{0.45\textwidth}|}
-		\hline
-		\textbf{Problem found} & \textbf{Change} \\
-		\hline
-		Clips did not play in the browser (unsupported codec). & An H.264 playback copy is made of every upload. \\
-		\hline
-		Some camera angles produced invalid numbers (NaN). & The camera matrix is scaled safely; invalid numbers are caught. \\
-		\hline
-		A lime-green kit was taken for grass. & Grass colour is measured around each player. \\
-		\hline
-		The progress bar jumped backwards. & Updates of one match are applied in order. \\
-		\hline
-		A top speed of 39.6\,km/h. & Top speed as the best one-second average. \\
-		\hline
-		The first half was over the 500\,MB upload limit. & Limit raised to 1\,GB; GPU upload in pieces. \\
-		\hline
-		OpenCV could not seek in the AV1 halves. & All stages read the H.264 copy. \\
-		\hline
-		Sideline people and spare balls were analysed. & Clean-up with pitch positions. \\
-		\hline
-		The referee joined a team. & Referee kit learned from the assistants. \\
-		\hline
-		1,423 track numbers in one half. & Tracks joined; players labelled by position. \\
-		\hline
-		282 formation changes and jumping paths. & 20-second stability rule; smoothed camera model. \\
-		\hline
-		A finished half was analysed again after the laptop slept. & A ``done'' note per job. \\
-		\hline
-	\end{tabular}
+% This table may break across pages; single line spacing keeps its rows as compact as the other tables.
+\begin{spacing}{1}
+\begin{longtable}{|p{0.45\textwidth}|p{0.45\textwidth}|}
+	\hline
+	\textbf{Problem found} & \textbf{Change} \\
+	\hline
+	\endhead
+	Clips did not play in the browser (unsupported codec). & An H.264 playback copy is made of every upload. \\
+	\hline
+	Some camera angles produced invalid numbers (NaN). & The camera matrix is scaled safely; invalid numbers are caught. \\
+	\hline
+	A lime-green kit was taken for grass. & Grass colour is measured around each player. \\
+	\hline
+	The progress bar jumped backwards. & Updates of one match are applied in order. \\
+	\hline
+	A top speed of 39.6\,km/h. & Top speed as the best one-second average. \\
+	\hline
+	The first half was over the 500\,MB upload limit. & Limit raised to 1\,GB; GPU upload in pieces. \\
+	\hline
+	OpenCV could not seek in the AV1 halves. & All stages read the H.264 copy. \\
+	\hline
+	Sideline people and spare balls were analysed. & Clean-up with pitch positions. \\
+	\hline
+	The referee joined a team. & Referee kit learned from the assistants. \\
+	\hline
+	1,423 track numbers in one half. & Tracks joined; players labelled by position. \\
+	\hline
+	282 formation changes and jumping paths. & 20-second stability rule; smoothed camera model. \\
+	\hline
+	A finished half was analysed again after the laptop slept. & A ``done'' note per job. \\
+	\hline
 	\caption{Problems found during testing and the changes they led to}
 	\label{tab:lessons}
-\end{table}
+\end{longtable}
+\end{spacing}
 
 Every new kind of footage exposed problems the earlier tests could not have found (\autoref{tab:lessons}). The five 30-second clips had made the pipeline look finished; only the full halves showed the sidelines, the spare balls and the identity problem. Testing on long, real footage early, and turning each defect into a test, would have saved me the most time.
 
